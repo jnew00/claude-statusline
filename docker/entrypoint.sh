@@ -33,13 +33,15 @@ start_vnc() {
     mkdir -p ~/.vnc
     x11vnc -storepasswd "claude" ~/.vnc/passwd
 
-    # Start x11vnc with password
+    # Start x11vnc on internal port 5901 (localhost only)
     x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd \
-           -rfbport 5900 -bg -o /tmp/x11vnc.log -localhost
+           -rfbport 5901 -bg -o /tmp/x11vnc.log -localhost
 
-    # Start noVNC web server (bind to all interfaces)
+    sleep 1
+
+    # Start noVNC web server on VNC_PORT, connecting to x11vnc on 5901
     log "Starting noVNC web interface on port ${VNC_PORT}..."
-    /opt/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 0.0.0.0:${VNC_PORT} > /tmp/novnc.log 2>&1 &
+    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:${VNC_PORT} > /tmp/novnc.log 2>&1 &
     NOVNC_PID=$!
 
     sleep 3
