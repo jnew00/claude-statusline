@@ -14,6 +14,8 @@ error() { echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1"; }
 # Start Xvfb (virtual display)
 start_xvfb() {
     log "Starting Xvfb on display :99..."
+    # Clear stale lock files
+    rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
     Xvfb :99 -screen 0 1280x720x24 &
     XVFB_PID=$!
     sleep 2
