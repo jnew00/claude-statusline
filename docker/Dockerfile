@@ -1,41 +1,18 @@
 # Claude Plan Usage Scraper - Docker Image
 # Runs Playwright with xvfb for headless-but-not-really operation
 
-FROM node:20-slim
+FROM node:20-bookworm
 
 # Install dependencies for Playwright + xvfb + VNC
-RUN apt-get update && apt-get install -y \
-    # Playwright dependencies
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libdbus-1-3 \
-    libxkbcommon0 \
-    libatspi2.0-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpango-1.0-0 \
-    libcairo2 \
-    # Virtual display + VNC
-    xvfb \
-    x11vnc \
-    # Utilities
-    procps \
-    curl \
-    jq \
-    python3 \
-    python3-numpy \
-    git \
-    && rm -rf /var/lib/apt/lists/* \
-    # Install noVNC from git (not in apt)
-    && git clone --depth 1 https://github.com/novnc/noVNC.git /opt/novnc \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
+    xvfb x11vnc procps curl jq python3 git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install noVNC from git
+RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/novnc \
     && git clone --depth 1 https://github.com/novnc/websockify.git /opt/novnc/utils/websockify \
     && ln -s /opt/novnc/vnc.html /opt/novnc/index.html
 
