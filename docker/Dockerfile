@@ -39,15 +39,22 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY tsconfig.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including devDependencies for build)
+RUN npm ci
 
 # Install Playwright browsers
 RUN npx playwright install chromium
 
-# Copy application code
-COPY dist/ ./dist/
+# Copy source and build
+COPY src/ ./src/
+RUN npm run build
+
+# Remove devDependencies after build
+RUN npm prune --production
+
+# Copy scripts
 COPY docker/entrypoint.sh ./
 COPY docker/serve.sh ./
 
