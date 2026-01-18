@@ -13,26 +13,32 @@ error() { echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1"; }
 
 # Start Xvfb (virtual display)
 start_xvfb() {
-    log "Starting Xvfb on display :99..."
+    # Use a random display number to avoid conflicts
+    DISPLAY_NUM=$((RANDOM % 100 + 10))
+    export DISPLAY=:${DISPLAY_NUM}
+
+    log "Starting Xvfb on display :${DISPLAY_NUM}..."
 
     # Kill any existing Xvfb
     pkill -9 Xvfb 2>/dev/null || true
     sleep 1
 
-    # Clear stale lock files
-    rm -rf /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
+    # Clear ALL X lock files
+    rm -rf /tmp/.X*-lock /tmp/.X11-unix/* 2>/dev/null || true
     mkdir -p /tmp/.X11-unix
     chmod 1777 /tmp/.X11-unix
 
-    Xvfb :99 -screen 0 1280x720x24 &
+    Xvfb :${DISPLAY_NUM} -screen 0 1280x720x24 &
     XVFB_PID=$!
     sleep 2
 
     if ! kill -0 $XVFB_PID 2>/dev/null; then
         error "Failed to start Xvfb"
+        log "Lock files:"
+        ls -la /tmp/.X*-lock /tmp/.X11-unix/ 2>/dev/null || true
         exit 1
     fi
-    log "Xvfb started (PID: $XVFB_PID)"
+    log "Xvfb started (PID: $XVFB_PID) on DISPLAY=${DISPLAY}"
 }
 
 # Start VNC server for remote access (login mode only)
@@ -44,7 +50,7 @@ start_vnc() {
     x11vnc -storepasswd "claude" ~/.vnc/passwd
 
     # Start x11vnc on internal port 5901 (localhost only)
-    x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd \
+    x11vnc -display ${DISPLAY} -forever -shared -rfbauth ~/.vnc/passwd \
            -rfbport 5901 -bg -o /tmp/x11vnc.log -localhost
 
     # Start clipboard sync
