@@ -73,6 +73,13 @@ run_scraper() {
     fi
 }
 
+# Clear stale browser locks
+clear_locks() {
+    log "Clearing stale browser locks..."
+    rm -f "${PROFILE_DIR}/SingletonLock" "${PROFILE_DIR}/SingletonCookie" "${PROFILE_DIR}/SingletonSocket" 2>/dev/null || true
+    rm -rf "${PROFILE_DIR}/Singleton*" 2>/dev/null || true
+}
+
 # Login mode - opens browser with VNC access
 login_mode() {
     log "=== LOGIN MODE ==="
@@ -81,6 +88,7 @@ login_mode() {
     log "Connect via VNC to see and interact with the browser."
     log ""
 
+    clear_locks
     start_xvfb
     start_vnc
 
@@ -111,6 +119,7 @@ scrape_mode() {
         exit 1
     fi
 
+    clear_locks
     start_xvfb
 
     # Create .claude directory and symlink profile
@@ -135,6 +144,7 @@ daemon_mode() {
 
     INTERVAL=${SCRAPE_INTERVAL:-600}  # Default 10 minutes
 
+    clear_locks
     start_xvfb
     start_http_server
 
