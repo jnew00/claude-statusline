@@ -23,8 +23,12 @@ import { exec } from "child_process";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const USAGE_URL = "https://claude.ai/settings/usage";
-const OUTPUT_PATH = path.join(os.homedir(), ".claude", "plan-usage.json");
-const PLAYWRIGHT_PROFILE_DIR = path.join(os.homedir(), ".claude", "playwright-profile");
+const OUTPUT_PATH = process.env.OUTPUT_DIR
+  ? path.join(process.env.OUTPUT_DIR, "plan-usage.json")
+  : path.join(os.homedir(), ".claude", "plan-usage.json");
+const PLAYWRIGHT_PROFILE_DIR = process.env.PROFILE_DIR
+  || process.env.PLAYWRIGHT_PROFILE_DIR
+  || path.join(os.homedir(), ".claude", "playwright-profile");
 const MAX_RETRIES = 1;
 const NAVIGATION_TIMEOUT = 30_000;
 
