@@ -28,13 +28,14 @@ start_xvfb() {
 # Start VNC server for remote access (login mode only)
 start_vnc() {
     log "Starting VNC server..."
-    # Remove any existing password files and force no authentication
-    rm -f ~/.vnc/passwd /tmp/vncpasswd 2>/dev/null
 
-    # Start x11vnc on localhost only (noVNC will proxy it)
-    x11vnc -display :99 -forever -shared -nopw -noxdamage \
-           -rfbport 5900 -bg -o /tmp/x11vnc.log \
-           -localhost -auth guess
+    # Set a known password
+    mkdir -p ~/.vnc
+    x11vnc -storepasswd "claude" ~/.vnc/passwd
+
+    # Start x11vnc with password
+    x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd \
+           -rfbport 5900 -bg -o /tmp/x11vnc.log -localhost
 
     # Start noVNC web server
     log "Starting noVNC web interface on port ${VNC_PORT}..."
@@ -44,6 +45,7 @@ start_vnc() {
     log "=========================================="
     log "  noVNC ready! Open in browser:"
     log "  http://your-server:${VNC_PORT}/vnc.html"
+    log "  Password: claude"
     log "=========================================="
 }
 
