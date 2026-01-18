@@ -67,10 +67,6 @@ start_vnc() {
         log "x11vnc started (PID: $X11VNC_PID)"
     fi
 
-    # Start clipboard sync
-    autocutsel -fork 2>/dev/null || true
-    autocutsel -selection PRIMARY -fork 2>/dev/null || true
-
     # Start noVNC using websockify (installed via pip)
     log "Starting noVNC/websockify on port ${VNC_PORT}..."
     websockify --web /opt/novnc ${VNC_PORT} localhost:5901 > /tmp/novnc.log 2>&1 &

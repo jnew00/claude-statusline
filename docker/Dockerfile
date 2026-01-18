@@ -9,7 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 \
     libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
     xvfb x11vnc procps curl jq python3 python3-pip git ca-certificates \
-    autocutsel xclip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install websockify via pip (more reliable than git clone)
