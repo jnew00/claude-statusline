@@ -402,6 +402,9 @@ async function scrapeWithRetry(config: Config): Promise<UsageData> {
           "--disable-infobars",
           "--noerrdialogs",
           "--hide-crash-restore-bubble",
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-gpu",
         ],
         ignoreDefaultArgs: ["--enable-automation"],
         viewport: config.headed ? null : { width: 800, height: 600 },
@@ -477,7 +480,14 @@ async function loginOnlyMode(): Promise<void> {
 
   const context = await chromium.launchPersistentContext(PLAYWRIGHT_PROFILE_DIR, {
     headless: false,
-    args: ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-first-run",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
     timeout: 0, // No timeout
   });
 
