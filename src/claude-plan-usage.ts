@@ -287,15 +287,16 @@ async function scrapeUsageData(page: Page): Promise<UsageData> {
     // Wait for page to load (don't use networkidle - SPAs never go idle)
     await page.waitForLoadState("domcontentloaded", { timeout: NAVIGATION_TIMEOUT });
 
-    // Wait for content to appear - look for any percentage on page
+    // Wait for actual usage content to appear - specifically "X% used" text
+    // This distinguishes real content from JS/CSS percentages
     log("Waiting for usage data to appear...");
     await page.waitForFunction(
-      () => document.body?.textContent?.match(/\d+%/),
+      () => document.body?.textContent?.includes("% used"),
       { timeout: NAVIGATION_TIMEOUT }
     );
 
-    // Small delay for React to finish rendering
-    await page.waitForTimeout(1000);
+    // Extra delay for React hydration to complete
+    await page.waitForTimeout(2000);
 
     const pageContent = await page.textContent("body");
 
