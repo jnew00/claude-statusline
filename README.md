@@ -1,116 +1,63 @@
 # Claude Plan Usage Scraper
 
-Scrapes Claude Max plan usage percentages from the web UI and writes them to `~/.claude/plan-usage.json` for use in shell prompts or statuslines.
+Scrapes Claude Max plan usage percentages from the web UI and serves them via HTTP for statuslines.
 
-## Prerequisites
+## Docker Setup (Unraid/Server)
 
-- macOS
-- Node.js 18+ (`brew install node`)
-- jq (optional, for statusline script: `brew install jq`)
-
-## Setup
+### Build
 
 ```bash
-cd /Users/Jason/Development/claude-statusline
-npm install
-npx playwright install chromium
-npm run build
+cd docker
+docker build -t claude-plan-usage -f Dockerfile ..
 ```
 
-## First Run: Log In
-
-Open browser and log into claude.ai (session gets saved):
+### First Time: Login
 
 ```bash
-npm run dev -- --login
+docker-compose run --service-ports login
 ```
 
-1. Browser opens to claude.ai
-2. Log in with Google (take your time)
+1. Open VNC at `http://your-server:5901/vnc.html` (password: `claude`)
+2. Log into claude.ai in the browser
 3. Press **Enter** in terminal when done
-4. Session saved to `~/.claude/playwright-profile/`
 
-## Usage
-
-After logging in, scrape usage data:
+### Run Daemon
 
 ```bash
-npm run dev
+docker-compose up -d scraper
 ```
 
-Output written to `~/.claude/plan-usage.json`:
+Scrapes every 10 minutes and serves JSON at:
+```
+http://your-server:8577/plan-usage.json
+```
+
+### Re-login (when session expires)
+
+```bash
+docker-compose down
+docker-compose run --service-ports login
+# Connect to VNC, log in, press Enter
+docker-compose up -d scraper
+```
+
+## Output Format
+
 ```json
 {
-  "five_hour_percent": 34,
-  "weekly_percent": 62,
-  "resets_in": "2h 40m",
-  "resets_in_minutes": 160,
-  "fetched_at": "2026-01-17T15:30:00.000Z"
+  "five_hour_percent": 18,
+  "weekly_percent": 33,
+  "resets_in": "3h 32m",
+  "resets_in_minutes": 212,
+  "fetched_at": "2026-01-18T21:40:00.000Z"
 }
 ```
 
-### Options
+## Statusline Integration
 
+Set the environment variable in your Claude Code config:
 ```bash
-npm run dev -- --login    # Login mode (browser stays open until Enter)
-npm run dev -- --headed   # Run with visible browser
-npm run dev -- --help     # Show help
+export CLAUDE_PLAN_USAGE_URL="http://192.168.2.222:8577/plan-usage.json"
 ```
 
-## Scheduled Execution (launchd)
-
-Edit the plist template with your paths:
-
-```bash
-# Find your node path
-which node
-
-# Edit paths in the plist
-nano com.username.claude-plan-usage.plist
-
-# Copy and load
-cp com.username.claude-plan-usage.plist ~/Library/LaunchAgents/com.$(whoami).claude-plan-usage.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.$(whoami).claude-plan-usage.plist
-
-# Test it
-launchctl kickstart -k gui/$(id -u)/com.$(whoami).claude-plan-usage
-
-# Check logs
-tail -f ~/Library/Logs/claude-plan-usage.log
-```
-
-## Statusline Helper
-
-For shell prompts or tmux:
-
-```bash
-./bin/claude-plan-usage-status
-# Output: C5h:34% Wk:62% ⏱2h 40m
-```
-
-### Zsh Prompt
-
-Add to `~/.zshrc`:
-```bash
-RPROMPT='$(/Users/Jason/Development/claude-statusline/bin/claude-plan-usage-status 2>/dev/null)'
-```
-
-### tmux
-
-Add to `~/.tmux.conf`:
-```bash
-set -g status-right '#(/Users/Jason/Development/claude-statusline/bin/claude-plan-usage-status) | %H:%M'
-```
-
-## Re-login
-
-If session expires, run `--login` again:
-
-```bash
-npm run dev -- --login
-```
-
-## Files
-
-- `~/.claude/playwright-profile/` - Saved browser session
-- `~/.claude/plan-usage.json` - Usage data output
+The statusline.sh will fetch from this URL instead of a local file.
