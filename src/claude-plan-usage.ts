@@ -487,6 +487,8 @@ async function loginOnlyMode(): Promise<void> {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
+      "--window-position=0,0",
+      "--window-size=1200,700",
     ],
     timeout: 0, // No timeout
   });
