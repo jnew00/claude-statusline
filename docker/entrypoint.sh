@@ -45,16 +45,9 @@ start_xvfb() {
 start_vnc() {
     log "Starting VNC server..."
 
-    # Set a known password (remove old file to avoid overwrite prompt)
-    mkdir -p ~/.vnc
-    rm -f ~/.vnc/passwd
-    echo "claude" | x11vnc -storepasswd - ~/.vnc/passwd 2>/dev/null || \
-        x11vnc -storepasswd "claude" ~/.vnc/passwd </dev/null
-
     log "Starting x11vnc on port 5901..."
-    # Start x11vnc on internal port 5901 (localhost only)
-    # Use & instead of -bg to avoid potential hangs
-    x11vnc -display ${DISPLAY} -forever -shared -rfbauth ~/.vnc/passwd \
+    # Use -passwd directly instead of password file (more reliable)
+    x11vnc -display ${DISPLAY} -forever -shared -passwd claude \
            -rfbport 5901 -q -localhost -noxdamage > /tmp/x11vnc.log 2>&1 &
     X11VNC_PID=$!
     sleep 2
