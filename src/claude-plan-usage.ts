@@ -305,22 +305,25 @@ async function scrapeUsageData(page: Page): Promise<UsageData> {
 
     log("Page loaded, searching for usage data...");
 
-    // Look for elements containing "X% used" pattern (the actual format on the page)
-    // HTML structure: <p class="...">18% used</p>
-    const usedElements = await page.locator('text=/\\d+%\\s*used/i').all();
-    log(`Found ${usedElements.length} elements with "X% used" pattern`);
+    // Debug: log a snippet of page content to see what we're working with
+    const snippet = pageContent.substring(0, 500);
+    log(`Page content snippet: ${snippet.replace(/\s+/g, ' ')}`);
+
+    // Method 1: Parse directly from page text using regex
+    // Look for "X% used" pattern in the full text
+    const usedMatches = pageContent.match(/(\d+(?:\.\d+)?)\s*%\s*used/gi);
+    log(`Regex matches for "X% used": ${JSON.stringify(usedMatches)}`);
 
     const percentages: number[] = [];
-    for (const el of usedElements) {
-      const text = await el.textContent();
-      if (text) {
-        const match = text.match(/(\d+(?:\.\d+)?)\s*%/);
-        if (match) {
-          percentages.push(parseFloat(match[1]));
-          log(`Found usage: ${match[1]}% from "${text.trim()}"`);
+    if (usedMatches) {
+      for (const match of usedMatches) {
+        const numMatch = match.match(/(\d+(?:\.\d+)?)/);
+        if (numMatch) {
+          percentages.push(parseFloat(numMatch[1]));
+          log(`Found usage: ${numMatch[1]}% from "${match}"`);
         }
+        if (percentages.length >= 2) break;
       }
-      if (percentages.length >= 2) break;
     }
 
     // First percentage is 5-hour/session usage, second is weekly
@@ -333,29 +336,34 @@ async function scrapeUsageData(page: Page): Promise<UsageData> {
       data.raw.weekly = `${percentages[1]}% used`;
     }
 
-    // Fallback: if "X% used" pattern didn't work, try any percentage elements
+    // Fallback: if "X% used" pattern didn't work, try finding any percentages
     if (data.five_hour_percent === null || data.weekly_percent === null) {
-      log("Trying fallback percentage extraction...");
-      const percentElements = await page.locator('text=/\\d+%/').all();
-      const fallbackPercentages: number[] = [];
-      for (const el of percentElements) {
-        const text = await el.textContent();
-        if (text) {
-          const match = text.match(/(\d+(?:\.\d+)?)\s*%/);
-          if (match && !fallbackPercentages.includes(parseFloat(match[1]))) {
-            fallbackPercentages.push(parseFloat(match[1]));
+      log("Trying fallback: all percentages in page text...");
+      const allPercentMatches = pageContent.match(/(\d+(?:\.\d+)?)\s*%/g);
+      log(`All percentage matches: ${JSON.stringify(allPercentMatches?.slice(0, 10))}`);
+
+      if (allPercentMatches) {
+        const fallbackPercentages: number[] = [];
+        for (const match of allPercentMatches) {
+          const numMatch = match.match(/(\d+(?:\.\d+)?)/);
+          if (numMatch) {
+            const num = parseFloat(numMatch[1]);
+            // Filter out likely noise (0%, 100%, very large numbers)
+            if (num > 0 && num <= 100 && !fallbackPercentages.includes(num)) {
+              fallbackPercentages.push(num);
+            }
           }
+          if (fallbackPercentages.length >= 2) break;
         }
-        if (fallbackPercentages.length >= 2) break;
-      }
-      log(`Fallback found ${fallbackPercentages.length} percentages: ${fallbackPercentages.join(", ")}`);
-      if (data.five_hour_percent === null && fallbackPercentages[0] !== undefined) {
-        data.five_hour_percent = fallbackPercentages[0];
-        data.raw.five_hour = `${fallbackPercentages[0]}% (fallback)`;
-      }
-      if (data.weekly_percent === null && fallbackPercentages[1] !== undefined) {
-        data.weekly_percent = fallbackPercentages[1];
-        data.raw.weekly = `${fallbackPercentages[1]}% (fallback)`;
+        log(`Filtered fallback percentages: ${fallbackPercentages.join(", ")}`);
+        if (data.five_hour_percent === null && fallbackPercentages[0] !== undefined) {
+          data.five_hour_percent = fallbackPercentages[0];
+          data.raw.five_hour = `${fallbackPercentages[0]}% (fallback)`;
+        }
+        if (data.weekly_percent === null && fallbackPercentages[1] !== undefined) {
+          data.weekly_percent = fallbackPercentages[1];
+          data.raw.weekly = `${fallbackPercentages[1]}% (fallback)`;
+        }
       }
     }
 
