@@ -121,24 +121,26 @@ async function hideWindow(context: BrowserContext, page: Page): Promise<void> {
     });
     log("Window moved off-screen via CDP");
 
-    // Then minimize via AppleScript (belt and suspenders)
-    const script = `
-      tell application "System Events"
-        set chromeProcs to every process whose name contains "Chromium" or name contains "chrome"
-        repeat with proc in chromeProcs
-          try
-            set miniaturized of every window of proc to true
-          end try
-        end repeat
-      end tell
-    `;
-    exec(`osascript -e '${script}'`, (err) => {
-      if (err) {
-        log(`AppleScript minimize failed: ${err.message}`);
-      } else {
-        log("Window minimized via AppleScript");
-      }
-    });
+    // Minimize via AppleScript on macOS only
+    if (process.platform === "darwin") {
+      const script = `
+        tell application "System Events"
+          set chromeProcs to every process whose name contains "Chromium" or name contains "chrome"
+          repeat with proc in chromeProcs
+            try
+              set miniaturized of every window of proc to true
+            end try
+          end repeat
+        end tell
+      `;
+      exec(`osascript -e '${script}'`, (err) => {
+        if (err) {
+          log(`AppleScript minimize failed: ${err.message}`);
+        } else {
+          log("Window minimized via AppleScript");
+        }
+      });
+    }
   } catch (err) {
     log(`Failed to hide window: ${err}`);
   }
@@ -303,38 +305,65 @@ async function scrapeUsageData(page: Page): Promise<UsageData> {
 
     log("Page loaded, searching for usage data...");
 
-    // Find all percentages on the page
-    const allPercentages = pageContent.match(/\d+(?:\.\d+)?%/g) || [];
-
-    // Strategy: Look for sections containing "session" (5-hour) and "daily" (daily limit)
-    // The page shows "Current session" for 5-hour and might show daily limits
-
-    // Try to find session/5-hour usage
-    const sessionMatch = pageContent.match(/(?:current\s+session|5.?hour)[^]*?([\d.]+)%/i);
-    if (sessionMatch) {
-      data.five_hour_percent = parseFloat(sessionMatch[1]);
-      data.raw.five_hour = sessionMatch[0].substring(0, 100).trim();
-      log(`Found session usage: ${data.five_hour_percent}%`);
+    // Try to find percentages near specific labels using Playwright locators
+    try {
+      // Look for elements containing percentage text near "Current session" or "5-hour"
+      const sessionSection = await page.locator('text=/current session/i').first();
+      if (await sessionSection.count() > 0) {
+        const parent = sessionSection.locator('xpath=ancestor::div[position() <= 5]').last();
+        const parentText = await parent.textContent() || "";
+        const pctMatch = parentText.match(/(\d+(?:\.\d+)?)\s*%/);
+        if (pctMatch) {
+          data.five_hour_percent = parseFloat(pctMatch[1]);
+          data.raw.five_hour = `${pctMatch[1]}% (from Current session section)`;
+          log(`Found session usage via locator: ${data.five_hour_percent}%`);
+        }
+      }
+    } catch (e) {
+      log(`Locator search for session failed: ${e}`);
     }
 
-    // Try to find daily/weekly usage
-    const dailyMatch = pageContent.match(/(?:daily|weekly)[^]*?([\d.]+)%/i);
-    if (dailyMatch) {
-      data.weekly_percent = parseFloat(dailyMatch[1]);
-      data.raw.weekly = dailyMatch[0].substring(0, 100).trim();
-      log(`Found daily/weekly usage: ${data.weekly_percent}%`);
+    try {
+      // Look for elements containing percentage text near "Weekly" or "Daily"
+      const weeklySection = await page.locator('text=/weekly|daily/i').first();
+      if (await weeklySection.count() > 0) {
+        const parent = weeklySection.locator('xpath=ancestor::div[position() <= 5]').last();
+        const parentText = await parent.textContent() || "";
+        const pctMatch = parentText.match(/(\d+(?:\.\d+)?)\s*%/);
+        if (pctMatch) {
+          data.weekly_percent = parseFloat(pctMatch[1]);
+          data.raw.weekly = `${pctMatch[1]}% (from Weekly section)`;
+          log(`Found weekly usage via locator: ${data.weekly_percent}%`);
+        }
+      }
+    } catch (e) {
+      log(`Locator search for weekly failed: ${e}`);
     }
 
-    // Fallback: if we only have percentages, try to assign them
-    if (data.five_hour_percent === null && allPercentages[0]) {
-      data.five_hour_percent = parseFloat(allPercentages[0]);
-      data.raw.five_hour = allPercentages[0];
-      log(`Fallback 5-hour: ${data.five_hour_percent}%`);
-    }
-    if (data.weekly_percent === null && allPercentages[1]) {
-      data.weekly_percent = parseFloat(allPercentages[1]);
-      data.raw.weekly = allPercentages[1];
-      log(`Fallback weekly: ${data.weekly_percent}%`);
+    // Fallback: find all visible percentages on page (not in scripts)
+    if (data.five_hour_percent === null || data.weekly_percent === null) {
+      log("Trying fallback percentage extraction...");
+      const percentElements = await page.locator('text=/\\d+%/').all();
+      const percentages: number[] = [];
+      for (const el of percentElements) {
+        const text = await el.textContent();
+        if (text) {
+          const match = text.match(/(\d+(?:\.\d+)?)\s*%/);
+          if (match) {
+            percentages.push(parseFloat(match[1]));
+          }
+        }
+        if (percentages.length >= 2) break;
+      }
+      log(`Found ${percentages.length} percentages: ${percentages.join(", ")}`);
+      if (data.five_hour_percent === null && percentages[0] !== undefined) {
+        data.five_hour_percent = percentages[0];
+        data.raw.five_hour = `${percentages[0]}% (fallback)`;
+      }
+      if (data.weekly_percent === null && percentages[1] !== undefined) {
+        data.weekly_percent = percentages[1];
+        data.raw.weekly = `${percentages[1]}% (fallback)`;
+      }
     }
 
     // Parse reset time (e.g., "Resets in 2 hr 40 min" or "Resets in 45 min")
