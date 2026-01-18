@@ -23,19 +23,21 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     libpango-1.0-0 \
     libcairo2 \
-    # Virtual display
+    # Virtual display + VNC
     xvfb \
-    # VNC for initial login
     x11vnc \
-    # noVNC (web-based VNC)
-    novnc \
-    websockify \
     # Utilities
     procps \
     curl \
     jq \
-    # Cleanup
-    && rm -rf /var/lib/apt/lists/*
+    python3 \
+    python3-numpy \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    # Install noVNC from git (not in apt)
+    && git clone --depth 1 https://github.com/novnc/noVNC.git /opt/novnc \
+    && git clone --depth 1 https://github.com/novnc/websockify.git /opt/novnc/utils/websockify \
+    && ln -s /opt/novnc/vnc.html /opt/novnc/index.html
 
 # Create app directory
 WORKDIR /app

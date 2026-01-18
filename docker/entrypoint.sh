@@ -39,7 +39,7 @@ start_vnc() {
 
     # Start noVNC web server
     log "Starting noVNC web interface on port ${VNC_PORT}..."
-    /usr/share/novnc/utils/launch.sh --vnc localhost:5900 --listen ${VNC_PORT} &
+    /opt/novnc/utils/novnc_proxy --vnc localhost:5900 --listen ${VNC_PORT} &
 
     sleep 2
     log "=========================================="
