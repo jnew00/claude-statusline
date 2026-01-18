@@ -176,6 +176,12 @@ daemon_mode() {
 
     clear_locks
     start_xvfb
+
+    # Start VNC if enabled (for re-login or debugging)
+    if [ "${ENABLE_VNC:-false}" = "true" ]; then
+        start_vnc
+    fi
+
     start_http_server
 
     # Create .claude directory and symlink profile

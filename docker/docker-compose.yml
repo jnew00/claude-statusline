@@ -4,41 +4,56 @@
 version: '3.8'
 
 services:
+  # Main daemon service - runs scraper periodically and serves JSON
   claude-scraper:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: claude-plan-usage
     container_name: claude-plan-usage
     restart: unless-stopped
-
-    # Run in daemon mode (scrape every 10 minutes + serve HTTP)
     command: daemon
 
     ports:
       # HTTP server for JSON access
-      - "8080:8080"
-      # VNC for login (can be removed after initial login)
-      - "5900:5900"
+      - "8577:8080"
+      # VNC for re-login when session expires
+      - "5901:5900"
 
     volumes:
-      # Persistent storage for browser profile and output
       - claude-data:/data
 
     environment:
-      # Scrape interval in seconds (default: 600 = 10 minutes)
       - SCRAPE_INTERVAL=600
-      # HTTP port (inside container)
       - HTTP_PORT=8080
-      # VNC port (inside container)
       - VNC_PORT=5900
+      # Enable VNC in daemon mode for re-login capability
+      - ENABLE_VNC=true
 
-    # Resource limits (adjust as needed)
     deploy:
       resources:
         limits:
           memory: 1G
         reservations:
           memory: 512M
+
+  # Login service - use this for initial login or re-login
+  # Run with: docker-compose run --service-ports login
+  login:
+    image: claude-plan-usage
+    container_name: claude-plan-usage-login
+    command: login
+    profiles:
+      - login
+
+    ports:
+      - "5901:5900"
+
+    volumes:
+      - claude-data:/data
+
+    environment:
+      - VNC_PORT=5900
+
+    stdin_open: true
+    tty: true
 
 volumes:
   claude-data:
