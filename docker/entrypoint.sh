@@ -37,16 +37,24 @@ start_vnc() {
     x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd \
            -rfbport 5900 -bg -o /tmp/x11vnc.log -localhost
 
-    # Start noVNC web server
+    # Start noVNC web server (bind to all interfaces)
     log "Starting noVNC web interface on port ${VNC_PORT}..."
-    /opt/novnc/utils/novnc_proxy --vnc localhost:5900 --listen ${VNC_PORT} &
+    /opt/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 0.0.0.0:${VNC_PORT} > /tmp/novnc.log 2>&1 &
+    NOVNC_PID=$!
 
-    sleep 2
-    log "=========================================="
-    log "  noVNC ready! Open in browser:"
-    log "  http://your-server:${VNC_PORT}/vnc.html"
-    log "  Password: claude"
-    log "=========================================="
+    sleep 3
+
+    if kill -0 $NOVNC_PID 2>/dev/null; then
+        log "=========================================="
+        log "  noVNC ready! Open in browser:"
+        log "  http://your-server:${VNC_PORT}/vnc.html"
+        log "  Password: claude"
+        log "=========================================="
+    else
+        error "noVNC failed to start. Logs:"
+        cat /tmp/novnc.log
+        exit 1
+    fi
 }
 
 # Start HTTP server to serve the JSON file
