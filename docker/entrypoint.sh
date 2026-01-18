@@ -37,6 +37,10 @@ start_vnc() {
     x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd \
            -rfbport 5901 -bg -o /tmp/x11vnc.log -localhost
 
+    # Start clipboard sync
+    autocutsel -fork
+    autocutsel -selection PRIMARY -fork
+
     sleep 1
 
     # Start noVNC web server on VNC_PORT, connecting to x11vnc on 5901
