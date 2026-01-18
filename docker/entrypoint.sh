@@ -53,14 +53,23 @@ start_vnc() {
 
     log "Starting x11vnc on port 5901..."
     # Start x11vnc on internal port 5901 (localhost only)
+    # Use & instead of -bg to avoid potential hangs
     x11vnc -display ${DISPLAY} -forever -shared -rfbauth ~/.vnc/passwd \
-           -rfbport 5901 -bg -o /tmp/x11vnc.log -localhost
+           -rfbport 5901 -q -localhost -noxdamage > /tmp/x11vnc.log 2>&1 &
+    X11VNC_PID=$!
+    sleep 2
+
+    if ! kill -0 $X11VNC_PID 2>/dev/null; then
+        error "x11vnc failed to start. Logs:"
+        cat /tmp/x11vnc.log
+        # Continue anyway - VNC is optional
+    else
+        log "x11vnc started (PID: $X11VNC_PID)"
+    fi
 
     # Start clipboard sync
-    autocutsel -fork
-    autocutsel -selection PRIMARY -fork
-
-    sleep 1
+    autocutsel -fork 2>/dev/null || true
+    autocutsel -selection PRIMARY -fork 2>/dev/null || true
 
     # Start noVNC web server on VNC_PORT, connecting to x11vnc on 5901
     log "Starting noVNC web interface on port ${VNC_PORT}..."
