@@ -71,12 +71,12 @@ start_vnc() {
     autocutsel -fork 2>/dev/null || true
     autocutsel -selection PRIMARY -fork 2>/dev/null || true
 
-    # Start noVNC web server on VNC_PORT, connecting to x11vnc on 5901
-    log "Starting noVNC web interface on port ${VNC_PORT}..."
-    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:${VNC_PORT} > /tmp/novnc.log 2>&1 &
+    # Start noVNC using websockify (installed via pip)
+    log "Starting noVNC/websockify on port ${VNC_PORT}..."
+    websockify --web /opt/novnc ${VNC_PORT} localhost:5901 > /tmp/novnc.log 2>&1 &
     NOVNC_PID=$!
 
-    sleep 3
+    sleep 2
 
     if kill -0 $NOVNC_PID 2>/dev/null; then
         log "=========================================="
@@ -85,9 +85,10 @@ start_vnc() {
         log "  Password: claude"
         log "=========================================="
     else
-        error "noVNC failed to start. Logs:"
+        error "noVNC/websockify failed to start. Logs:"
         cat /tmp/novnc.log
-        exit 1
+        # Don't exit - VNC is optional, continue with daemon
+        warn "Continuing without VNC..."
     fi
 }
 
