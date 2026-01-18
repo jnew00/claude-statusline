@@ -27,6 +27,9 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     # VNC for initial login
     x11vnc \
+    # noVNC (web-based VNC)
+    novnc \
+    websockify \
     # Utilities
     procps \
     curl \

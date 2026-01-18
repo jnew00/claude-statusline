@@ -27,14 +27,24 @@ start_xvfb() {
 
 # Start VNC server for remote access (login mode only)
 start_vnc() {
-    log "Starting VNC server on port ${VNC_PORT} (no password)..."
+    log "Starting VNC server..."
     # Remove any existing password files and force no authentication
     rm -f ~/.vnc/passwd /tmp/vncpasswd 2>/dev/null
+
+    # Start x11vnc on localhost only (noVNC will proxy it)
     x11vnc -display :99 -forever -shared -nopw -noxdamage \
-           -rfbport ${VNC_PORT} -bg -o /tmp/x11vnc.log \
-           -auth guess -noauth
-    log "VNC server started. Connect to port ${VNC_PORT} to see the browser."
-    log "  Example: open vnc://your-server-ip:${VNC_PORT}"
+           -rfbport 5900 -bg -o /tmp/x11vnc.log \
+           -localhost -auth guess
+
+    # Start noVNC web server
+    log "Starting noVNC web interface on port ${VNC_PORT}..."
+    /usr/share/novnc/utils/launch.sh --vnc localhost:5900 --listen ${VNC_PORT} &
+
+    sleep 2
+    log "=========================================="
+    log "  noVNC ready! Open in browser:"
+    log "  http://your-server:${VNC_PORT}/vnc.html"
+    log "=========================================="
 }
 
 # Start HTTP server to serve the JSON file
@@ -74,8 +84,8 @@ login_mode() {
 
     log ""
     log "=========================================="
-    log "  VNC server ready on port ${VNC_PORT}"
-    log "  Connect with: vnc://your-server:${VNC_PORT}"
+    log "  Browser-based VNC ready!"
+    log "  Open: http://your-server:${VNC_PORT}/vnc.html"
     log "=========================================="
     log ""
 
