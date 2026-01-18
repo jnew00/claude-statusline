@@ -28,7 +28,11 @@ start_xvfb() {
 # Start VNC server for remote access (login mode only)
 start_vnc() {
     log "Starting VNC server on port ${VNC_PORT} (no password)..."
-    x11vnc -display :99 -forever -shared -nopw -rfbport ${VNC_PORT} -bg -o /tmp/x11vnc.log
+    # Remove any existing password files and force no authentication
+    rm -f ~/.vnc/passwd /tmp/vncpasswd 2>/dev/null
+    x11vnc -display :99 -forever -shared -nopw -noxdamage \
+           -rfbport ${VNC_PORT} -bg -o /tmp/x11vnc.log \
+           -auth guess -noauth
     log "VNC server started. Connect to port ${VNC_PORT} to see the browser."
     log "  Example: open vnc://your-server-ip:${VNC_PORT}"
 }
