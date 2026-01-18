@@ -43,7 +43,7 @@ services:
     profiles:
       - login
 
-    ports:
+    ports:got 
       - "5901:5900"
 
     volumes:
