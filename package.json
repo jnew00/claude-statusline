@@ -5,8 +5,7 @@
   "type": "module",
   "main": "dist/claude-plan-usage.js",
   "bin": {
-    "claude-plan-usage": "./dist/claude-plan-usage.js",
-    "claude-plan-usage-status": "./bin/claude-plan-usage-status"
+    "claude-plan-usage": "./dist/claude-plan-usage.js"
   },
   "scripts": {
     "build": "tsc",

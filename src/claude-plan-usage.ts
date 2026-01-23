@@ -436,6 +436,10 @@ async function scrapeWithRetry(config: Config): Promise<UsageData> {
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-gpu",
+          // Limit cache to prevent unbounded disk growth
+          "--disk-cache-size=52428800", // 50MB
+          "--disable-application-cache",
+          "--aggressive-cache-discard",
         ],
         ignoreDefaultArgs: ["--enable-automation"],
         viewport: config.headed ? null : { width: 800, height: 600 },
@@ -520,6 +524,10 @@ async function loginOnlyMode(): Promise<void> {
       "--disable-gpu",
       "--window-position=0,0",
       "--window-size=1200,700",
+      // Limit cache to prevent unbounded disk growth
+      "--disk-cache-size=52428800", // 50MB
+      "--disable-application-cache",
+      "--aggressive-cache-discard",
     ],
     timeout: 0, // No timeout
   });
