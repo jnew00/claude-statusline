@@ -1,56 +1,82 @@
 #!/usr/bin/env node
 /**
- * Claude Max Plan Usage Scraper
+ * Claude Plan Usage Fetcher (OAuth API)
  *
- * Scrapes usage percentages from the Claude web UI using Playwright
- * with a dedicated persistent profile for authentication.
+ * Fetches usage percentages from Anthropic OAuth API using stored credentials.
+ * Much simpler than web scraping - no browser needed!
  *
- * First run: Use --headed to log in manually, session will be saved
- * Subsequent runs: Reuses saved session automatically
+ * Reads credentials from: ~/.cli-proxy-api/claude-*.json
+ * Writes output to: ~/.claude/plan-usage.json
  *
  * Usage:
- *   npx tsx src/claude-plan-usage.ts [--headed]
+ *   npx tsx src/claude-plan-usage.ts [--daemon] [--interval 600]
  */
 
-import { chromium, type BrowserContext, type Page } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { exec } from "child_process";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-const USAGE_URL = "https://claude.ai/settings/usage";
+const AUTH_DIR = path.join(os.homedir(), ".cli-proxy-api");
 const OUTPUT_PATH = process.env.OUTPUT_DIR
   ? path.join(process.env.OUTPUT_DIR, "plan-usage.json")
   : path.join(os.homedir(), ".claude", "plan-usage.json");
-const PLAYWRIGHT_PROFILE_DIR = process.env.PROFILE_DIR
-  || process.env.PLAYWRIGHT_PROFILE_DIR
-  || path.join(os.homedir(), ".claude", "playwright-profile");
-const MAX_RETRIES = 1;
-const NAVIGATION_TIMEOUT = 30_000;
+const API_URL = "https://api.anthropic.com/api/oauth/usage";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface AuthFile {
+  access_token: string;
+  email: string;
+  expired?: string;
+  refresh_token?: string;
+}
+
+interface OAuthUsageResponse {
+  five_hour?: {
+    utilization: number;
+    resets_at: string;
+  };
+  seven_day?: {
+    utilization: number;
+    resets_at: string;
+  };
+  seven_day_sonnet?: {
+    utilization: number;
+    resets_at: string;
+  };
+  seven_day_opus?: {
+    utilization: number;
+    resets_at: string;
+  };
+  extra_usage?: {
+    is_enabled: boolean;
+    monthly_limit: number;
+    used_credits: number;
+    utilization: number;
+  };
+}
+
 interface UsageData {
   five_hour_percent: number | null;
   weekly_percent: number | null;
+  sonnet_percent: number | null;
+  opus_percent: number | null;
+  extra_percent: number | null;
   resets_in: string | null;
   resets_in_minutes: number | null;
-  raw: {
-    five_hour: string | null;
-    weekly: string | null;
-  };
   fetched_at: string;
+  email: string | null;
 }
 
 interface Config {
-  headed: boolean;
-  loginOnly: boolean;
+  daemon: boolean;
+  interval: number; // seconds
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,36 +86,34 @@ interface Config {
 function parseArgs(): Config {
   const args = process.argv.slice(2);
   const config: Config = {
-    headed: false,
-    loginOnly: false,
+    daemon: false,
+    interval: 600, // 10 minutes default
   };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--headed") {
-      config.headed = true;
-    } else if (arg === "--login") {
-      config.loginOnly = true;
-      config.headed = true; // login mode is always headed
+    if (arg === "--daemon") {
+      config.daemon = true;
+    } else if (arg === "--interval" && i + 1 < args.length) {
+      config.interval = parseInt(args[i + 1], 10);
+      i++;
     } else if (arg === "--help" || arg === "-h") {
       console.log(`
 Usage: claude-plan-usage [options]
 
 Options:
-  --login     LOGIN MODE: Opens browser, waits for you to log in, then exits.
-              Browser stays open as long as needed. Press Enter when done.
-  --headed    Run with visible browser window
-  -h, --help  Show this help message
+  --daemon           Run continuously, refreshing at intervals
+  --interval <sec>   Interval between refreshes in daemon mode (default: 600)
+  -h, --help         Show this help message
 
-Profile stored at: ${PLAYWRIGHT_PROFILE_DIR}
 Output written to: ${OUTPUT_PATH}
 
-First run:
-  npm run dev -- --login
-  Log into claude.ai, press Enter in terminal when done.
+Example:
+  # One-time fetch
+  npx tsx src/claude-plan-usage.ts
 
-Subsequent runs:
-  npm run dev
+  # Run as daemon (refresh every 5 minutes)
+  npx tsx src/claude-plan-usage.ts --daemon --interval 300
 `);
       process.exit(0);
     }
@@ -99,495 +123,225 @@ Subsequent runs:
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Utilities
+// Auth File Discovery
 // ─────────────────────────────────────────────────────────────────────────────
 
-function log(message: string): void {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${message}`);
-}
-
-/**
- * Move browser window off-screen using CDP and minimize via AppleScript
- */
-async function hideWindow(context: BrowserContext, page: Page): Promise<void> {
+function findAuthFile(): AuthFile | null {
   try {
-    // First move off-screen via CDP
-    const session = await context.newCDPSession(page);
-    const { windowId } = await session.send("Browser.getWindowForTarget");
-    await session.send("Browser.setWindowBounds", {
-      windowId,
-      bounds: { left: -2000, top: 0, width: 800, height: 600 },
-    });
-    log("Window moved off-screen via CDP");
-
-    // Minimize via AppleScript on macOS only
-    if (process.platform === "darwin") {
-      const script = `
-        tell application "System Events"
-          set chromeProcs to every process whose name contains "Chromium" or name contains "chrome"
-          repeat with proc in chromeProcs
-            try
-              set miniaturized of every window of proc to true
-            end try
-          end repeat
-        end tell
-      `;
-      exec(`osascript -e '${script}'`, (err) => {
-        if (err) {
-          log(`AppleScript minimize failed: ${err.message}`);
-        } else {
-          log("Window minimized via AppleScript");
-        }
-      });
-    }
-  } catch (err) {
-    log(`Failed to hide window: ${err}`);
-  }
-}
-
-function logError(message: string): void {
-  const timestamp = new Date().toISOString();
-  console.error(`[${timestamp}] ERROR: ${message}`);
-}
-
-/**
- * Ensure the output directory exists
- */
-function ensureOutputDir(): void {
-  const dir = path.dirname(OUTPUT_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-    log(`Created directory: ${dir}`);
-  }
-}
-
-/**
- * Write usage data to JSON file
- */
-function writeUsageData(data: UsageData): void {
-  ensureOutputDir();
-  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(data, null, 2) + "\n");
-  log(`Wrote usage data to ${OUTPUT_PATH}`);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Browser & Scraping Logic
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Check if we're on a login page instead of the usage page
- */
-async function isOnLoginPage(page: Page): Promise<boolean> {
-  const url = page.url();
-
-  // Check URL first
-  if (
-    url.includes("/login") ||
-    url.includes("/signin") ||
-    url.includes("/auth") ||
-    url.includes("accounts.google.com") ||
-    !url.includes("claude.ai/settings")
-  ) {
-    return true;
-  }
-
-  // Check for login form elements
-  const loginIndicators = [
-    'input[type="email"]',
-    'input[type="password"]',
-    'button:has-text("Sign in")',
-    'button:has-text("Log in")',
-  ];
-
-  for (const selector of loginIndicators) {
-    try {
-      const element = await page.$(selector);
-      if (element) {
-        return true;
-      }
-    } catch {
-      // Selector not found, continue
-    }
-  }
-
-  return false;
-}
-
-/**
- * Wait for user to log in manually - NO TIMEOUT
- */
-async function waitForManualLogin(page: Page): Promise<void> {
-  log("");
-  log("═══════════════════════════════════════════════════════════════");
-  log("  LOGIN REQUIRED - TAKE YOUR TIME");
-  log("═══════════════════════════════════════════════════════════════");
-  log("");
-  log("  Please log into claude.ai in the browser window.");
-  log("  Once logged in, the script will detect it automatically.");
-  log("");
-  log("  The browser will stay open until you're logged in.");
-  log("  Press Ctrl+C in terminal to cancel.");
-  log("");
-  log("═══════════════════════════════════════════════════════════════");
-  log("");
-
-  // Poll until we're logged in - no timeout
-  let checkCount = 0;
-  while (true) {
-    await page.waitForTimeout(3000);
-    checkCount++;
-
-    if (checkCount % 10 === 0) {
-      log("Still waiting for login...");
+    if (!fs.existsSync(AUTH_DIR)) {
+      console.error(`Auth directory not found: ${AUTH_DIR}`);
+      return null;
     }
 
-    const url = page.url();
-
-    // Success: on the usage page
-    if (url.includes("claude.ai/settings/usage")) {
-      log("Detected usage page, continuing...");
-      break;
-    }
-
-    // Logged in but not on usage page yet
-    if (url.includes("claude.ai") && !url.includes("login") && !url.includes("accounts.google") && !url.includes("oauth")) {
-      log("Logged in! Navigating to usage page...");
-      try {
-        await page.goto(USAGE_URL, { waitUntil: "domcontentloaded", timeout: 15000 });
-        await page.waitForTimeout(2000);
-        if (page.url().includes("claude.ai/settings/usage")) {
-          log("Successfully navigated to usage page");
-          break;
-        }
-      } catch {
-        log("Navigation attempt failed, will retry...");
-      }
-    }
-  }
-}
-
-/**
- * Scrape usage data from the page
- */
-async function scrapeUsageData(page: Page): Promise<UsageData> {
-  const data: UsageData = {
-    five_hour_percent: null,
-    weekly_percent: null,
-    resets_in: null,
-    resets_in_minutes: null,
-    raw: {
-      five_hour: null,
-      weekly: null,
-    },
-    fetched_at: new Date().toISOString(),
-  };
-
-  try {
-    // Wait for page to load (don't use networkidle - SPAs never go idle)
-    await page.waitForLoadState("domcontentloaded", { timeout: NAVIGATION_TIMEOUT });
-
-    // Wait for actual usage content to appear - specifically "X% used" text
-    // This distinguishes real content from JS/CSS percentages
-    log("Waiting for usage data to appear...");
-    await page.waitForFunction(
-      () => document.body?.textContent?.includes("% used"),
-      { timeout: NAVIGATION_TIMEOUT }
+    const files = fs.readdirSync(AUTH_DIR);
+    const claudeFiles = files.filter(
+      (f) => f.startsWith("claude-") && f.endsWith(".json")
     );
 
-    // Extra delay for React hydration to complete
-    await page.waitForTimeout(2000);
-
-    const pageContent = await page.textContent("body");
-
-    if (!pageContent) {
-      throw new Error("Page has no text content");
+    if (claudeFiles.length === 0) {
+      console.error("No Claude auth files found in ~/.cli-proxy-api/");
+      console.error(
+        "Please authenticate with Claude Code CLI first: claude auth login"
+      );
+      return null;
     }
 
-    log("Page loaded, searching for usage data...");
+    // Use first auth file found
+    const authPath = path.join(AUTH_DIR, claudeFiles[0]);
+    const authData = JSON.parse(fs.readFileSync(authPath, "utf-8"));
 
-    // Debug: log a snippet of page content to see what we're working with
-    const snippet = pageContent.substring(0, 500);
-    log(`Page content snippet: ${snippet.replace(/\s+/g, ' ')}`);
-
-    // Method 1: Parse directly from page text using regex
-    // Look for "X% used" pattern in the full text
-    const usedMatches = pageContent.match(/(\d+(?:\.\d+)?)\s*%\s*used/gi);
-    log(`Regex matches for "X% used": ${JSON.stringify(usedMatches)}`);
-
-    const percentages: number[] = [];
-    if (usedMatches) {
-      for (const match of usedMatches) {
-        const numMatch = match.match(/(\d+(?:\.\d+)?)/);
-        if (numMatch) {
-          percentages.push(parseFloat(numMatch[1]));
-          log(`Found usage: ${numMatch[1]}% from "${match}"`);
-        }
-        if (percentages.length >= 2) break;
-      }
+    if (!authData.access_token) {
+      console.error("Auth file missing access_token");
+      return null;
     }
 
-    // First percentage is 5-hour/session usage, second is weekly
-    if (percentages[0] !== undefined) {
-      data.five_hour_percent = percentages[0];
-      data.raw.five_hour = `${percentages[0]}% used`;
-    }
-    if (percentages[1] !== undefined) {
-      data.weekly_percent = percentages[1];
-      data.raw.weekly = `${percentages[1]}% used`;
-    }
-
-    // Fallback: if "X% used" pattern didn't work, try finding any percentages
-    if (data.five_hour_percent === null || data.weekly_percent === null) {
-      log("Trying fallback: all percentages in page text...");
-      const allPercentMatches = pageContent.match(/(\d+(?:\.\d+)?)\s*%/g);
-      log(`All percentage matches: ${JSON.stringify(allPercentMatches?.slice(0, 10))}`);
-
-      if (allPercentMatches) {
-        const fallbackPercentages: number[] = [];
-        for (const match of allPercentMatches) {
-          const numMatch = match.match(/(\d+(?:\.\d+)?)/);
-          if (numMatch) {
-            const num = parseFloat(numMatch[1]);
-            // Filter out likely noise (0%, 100%, very large numbers)
-            if (num > 0 && num <= 100 && !fallbackPercentages.includes(num)) {
-              fallbackPercentages.push(num);
-            }
-          }
-          if (fallbackPercentages.length >= 2) break;
-        }
-        log(`Filtered fallback percentages: ${fallbackPercentages.join(", ")}`);
-        if (data.five_hour_percent === null && fallbackPercentages[0] !== undefined) {
-          data.five_hour_percent = fallbackPercentages[0];
-          data.raw.five_hour = `${fallbackPercentages[0]}% (fallback)`;
-        }
-        if (data.weekly_percent === null && fallbackPercentages[1] !== undefined) {
-          data.weekly_percent = fallbackPercentages[1];
-          data.raw.weekly = `${fallbackPercentages[1]}% (fallback)`;
-        }
-      }
-    }
-
-    // Parse reset time (e.g., "Resets in 2 hr 40 min" or "Resets in 45 min")
-    const resetMatch = pageContent.match(/resets?\s+in\s+((\d+)\s*hr?)?\s*((\d+)\s*min)?/i);
-    if (resetMatch) {
-      const hours = resetMatch[2] ? parseInt(resetMatch[2]) : 0;
-      const minutes = resetMatch[4] ? parseInt(resetMatch[4]) : 0;
-      data.resets_in_minutes = hours * 60 + minutes;
-
-      // Format as human readable
-      if (hours > 0 && minutes > 0) {
-        data.resets_in = `${hours}h ${minutes}m`;
-      } else if (hours > 0) {
-        data.resets_in = `${hours}h`;
-      } else {
-        data.resets_in = `${minutes}m`;
-      }
-      log(`Found reset time: ${data.resets_in} (${data.resets_in_minutes} minutes)`);
-    }
-
-    if (data.five_hour_percent === null && data.weekly_percent === null) {
-      throw new Error("Could not find any usage percentages on the page");
-    }
-
+    return authData;
   } catch (error) {
-    throw new Error(`Failed to scrape usage data: ${error}`);
+    console.error("Error reading auth file:", error);
+    return null;
   }
-
-  return data;
-}
-
-/**
- * Main scraping function with retry logic
- */
-async function scrapeWithRetry(config: Config): Promise<UsageData> {
-  log(`Using Playwright profile: ${PLAYWRIGHT_PROFILE_DIR}`);
-
-  // Ensure profile directory exists
-  if (!fs.existsSync(PLAYWRIGHT_PROFILE_DIR)) {
-    fs.mkdirSync(PLAYWRIGHT_PROFILE_DIR, { recursive: true });
-    log("Created new Playwright profile directory");
-  }
-
-  let lastError: Error | null = null;
-  const maxAttempts = config.headed ? 1 : MAX_RETRIES + 1; // No retries in headed mode
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) {
-      log(`Retry attempt ${attempt}/${MAX_RETRIES}...`);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
-
-    let context: BrowserContext | null = null;
-
-    try {
-      log(`Launching browser (headed: ${config.headed})...`);
-
-      context = await chromium.launchPersistentContext(PLAYWRIGHT_PROFILE_DIR, {
-        headless: false, // Must be headed to bypass Cloudflare
-        args: [
-          "--disable-blink-features=AutomationControlled",
-          "--no-first-run",
-          "--disable-dev-shm-usage",
-          "--disable-session-crashed-bubble",
-          "--disable-infobars",
-          "--noerrdialogs",
-          "--hide-crash-restore-bubble",
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-gpu",
-          // Limit cache to prevent unbounded disk growth
-          "--disk-cache-size=52428800", // 50MB
-          "--disable-application-cache",
-          "--aggressive-cache-discard",
-        ],
-        ignoreDefaultArgs: ["--enable-automation"],
-        viewport: config.headed ? null : { width: 800, height: 600 },
-        timeout: 60_000,
-      });
-
-      log("Browser launched");
-
-      const page = context.pages()[0] || (await context.newPage());
-
-      // Hide window if not in headed mode
-      if (!config.headed) {
-        await hideWindow(context, page);
-      }
-
-      log(`Navigating to ${USAGE_URL}...`);
-      await page.goto(USAGE_URL, {
-        waitUntil: "domcontentloaded",
-        timeout: NAVIGATION_TIMEOUT,
-      });
-
-      log(`Current URL: ${page.url()}`);
-
-      // Check if login is needed
-      if (await isOnLoginPage(page)) {
-        if (!config.headed) {
-          logError("Not logged in. Run with --headed to log in manually.");
-          await context.close();
-          process.exit(2);
-        }
-
-        await waitForManualLogin(page);
-      }
-
-      // Scrape the data
-      const data = await scrapeUsageData(page);
-
-      await context.close();
-      return data;
-
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      logError(`Attempt ${attempt + 1} failed: ${lastError.message}`);
-
-      if (context) {
-        try {
-          await context.close();
-        } catch {
-          // Ignore
-        }
-      }
-    }
-  }
-
-  throw lastError || new Error("Unknown error during scraping");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main Entry Point
+// API Fetch
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Login-only mode: just open browser and wait for Enter key
- */
-async function loginOnlyMode(): Promise<void> {
-  log(`Using Playwright profile: ${PLAYWRIGHT_PROFILE_DIR}`);
-
-  if (!fs.existsSync(PLAYWRIGHT_PROFILE_DIR)) {
-    fs.mkdirSync(PLAYWRIGHT_PROFILE_DIR, { recursive: true });
-  }
-
-  log("Launching browser for login...");
-
-  const context = await chromium.launchPersistentContext(PLAYWRIGHT_PROFILE_DIR, {
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-first-run",
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--window-position=0,0",
-      "--window-size=1200,700",
-      // Limit cache to prevent unbounded disk growth
-      "--disk-cache-size=52428800", // 50MB
-      "--disable-application-cache",
-      "--aggressive-cache-discard",
-    ],
-    timeout: 0, // No timeout
-  });
-
-  const page = context.pages()[0] || (await context.newPage());
-
-  await page.goto("https://claude.ai", { waitUntil: "domcontentloaded", timeout: 60000 });
-
-  log("");
-  log("═══════════════════════════════════════════════════════════════");
-  log("  BROWSER OPEN - LOG IN NOW");
-  log("═══════════════════════════════════════════════════════════════");
-  log("");
-  log("  1. Log into claude.ai in the browser window");
-  log("  2. Take as long as you need");
-  log("  3. When done, press ENTER here to save session and exit");
-  log("");
-  log("═══════════════════════════════════════════════════════════════");
-  log("");
-
-  // Wait for Enter key
-  await new Promise<void>((resolve) => {
-    process.stdin.setRawMode?.(false);
-    process.stdin.resume();
-    process.stdin.once("data", () => resolve());
-  });
-
-  log("Saving session and closing browser...");
-  await context.close();
-  log("Session saved! You can now run without --login");
-}
-
-async function main(): Promise<void> {
-  log("Claude Plan Usage Scraper starting...");
-
-  const config = parseArgs();
-
-  // Login-only mode
-  if (config.loginOnly) {
-    await loginOnlyMode();
-    process.exit(0);
-  }
-
+async function fetchUsage(accessToken: string): Promise<OAuthUsageResponse | null> {
   try {
-    const data = await scrapeWithRetry(config);
+    const response = await fetch(API_URL, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        Accept: "application/json",
+      },
+    });
 
-    log("Successfully scraped usage data:");
-    log(`  5-hour window: ${data.five_hour_percent ?? "N/A"}%`);
-    log(`  Weekly: ${data.weekly_percent ?? "N/A"}%`);
-    log(`  Resets in: ${data.resets_in ?? "N/A"}`);
+    if (!response.ok) {
+      console.error(`API error: ${response.status} ${response.statusText}`);
+      return null;
+    }
 
-    writeUsageData(data);
-
-    log("Done!");
-    process.exit(0);
-
+    return await response.json();
   } catch (error) {
-    logError(`Fatal error: ${error}`);
+    console.error("Error fetching usage:", error);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Time Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatTimeRemaining(resetsAt: string): {
+  formatted: string;
+  minutes: number;
+} {
+  try {
+    const resetTime = new Date(resetsAt);
+    const now = new Date();
+    const diffMs = resetTime.getTime() - now.getTime();
+
+    if (diffMs <= 0) {
+      return { formatted: "now", minutes: 0 };
+    }
+
+    const minutes = Math.floor(diffMs / 60000);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) {
+      const remainingHours = hours % 24;
+      if (remainingHours > 0) {
+        return {
+          formatted: `${days}d ${remainingHours}h`,
+          minutes,
+        };
+      }
+      return { formatted: `${days}d`, minutes };
+    } else if (hours > 0) {
+      const remainingMinutes = minutes % 60;
+      if (remainingMinutes > 0) {
+        return {
+          formatted: `${hours}h ${remainingMinutes}m`,
+          minutes,
+        };
+      }
+      return { formatted: `${hours}h`, minutes };
+    } else {
+      return { formatted: `${Math.max(1, minutes)}m`, minutes };
+    }
+  } catch (error) {
+    return { formatted: "unknown", minutes: 0 };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Logic
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function scrapeUsage(): Promise<void> {
+  const auth = findAuthFile();
+  if (!auth) {
     process.exit(1);
   }
+
+  console.log(`Using auth for: ${auth.email}`);
+
+  const usage = await fetchUsage(auth.access_token);
+  if (!usage) {
+    console.error("Failed to fetch usage data");
+    process.exit(1);
+  }
+
+  // Calculate remaining percentages (100 - utilization)
+  const fiveHourPercent = usage.five_hour
+    ? Math.floor(100 - usage.five_hour.utilization)
+    : null;
+  const weeklyPercent = usage.seven_day
+    ? Math.floor(100 - usage.seven_day.utilization)
+    : null;
+  const sonnetPercent = usage.seven_day_sonnet
+    ? Math.floor(100 - usage.seven_day_sonnet.utilization)
+    : null;
+  const opusPercent = usage.seven_day_opus
+    ? Math.floor(100 - usage.seven_day_opus.utilization)
+    : null;
+  const extraPercent =
+    usage.extra_usage && usage.extra_usage.is_enabled
+      ? Math.floor(100 - usage.extra_usage.utilization)
+      : null;
+
+  // Use five_hour reset time for "resets_in"
+  let resetsIn: string | null = null;
+  let resetsInMinutes: number | null = null;
+  if (usage.five_hour?.resets_at) {
+    const timeRemaining = formatTimeRemaining(usage.five_hour.resets_at);
+    resetsIn = timeRemaining.formatted;
+    resetsInMinutes = timeRemaining.minutes;
+  }
+
+  const outputData: UsageData = {
+    five_hour_percent: fiveHourPercent,
+    weekly_percent: weeklyPercent,
+    sonnet_percent: sonnetPercent,
+    opus_percent: opusPercent,
+    extra_percent: extraPercent,
+    resets_in: resetsIn,
+    resets_in_minutes: resetsInMinutes,
+    fetched_at: new Date().toISOString(),
+    email: auth.email,
+  };
+
+  // Ensure output directory exists
+  const outputDir = path.dirname(OUTPUT_PATH);
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  // Write output
+  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(outputData, null, 2));
+
+  console.log(`✓ Usage data written to: ${OUTPUT_PATH}`);
+  console.log(
+    `  5-hour: ${fiveHourPercent}% remaining, weekly: ${weeklyPercent}% remaining`
+  );
+  if (resetsIn) {
+    console.log(`  Resets in: ${resetsIn}`);
+  }
 }
 
-main();
+// ─────────────────────────────────────────────────────────────────────────────
+// Entry Point
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const config = parseArgs();
+
+  if (config.daemon) {
+    console.log(
+      `Running in daemon mode (refresh every ${config.interval} seconds)...`
+    );
+    console.log("Press Ctrl+C to stop\n");
+
+    // Run immediately on start
+    await scrapeUsage();
+
+    // Then run on interval
+    setInterval(async () => {
+      console.log("\n" + new Date().toISOString());
+      await scrapeUsage();
+    }, config.interval * 1000);
+
+    // Keep process alive
+    await new Promise(() => {});
+  } else {
+    // One-time run
+    await scrapeUsage();
+  }
+}
+
+main().catch((error) => {
+  console.error("Fatal error:", error);
+  process.exit(1);
+});

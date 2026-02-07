@@ -1,7 +1,7 @@
 {
   "name": "claude-plan-usage",
-  "version": "1.0.0",
-  "description": "Scrape Claude Max plan usage percentages from the web UI",
+  "version": "2.0.0",
+  "description": "Fetch Claude plan usage percentages from Anthropic OAuth API",
   "type": "module",
   "main": "dist/claude-plan-usage.js",
   "bin": {
@@ -11,20 +11,17 @@
     "build": "tsc",
     "start": "node dist/claude-plan-usage.js",
     "dev": "tsx src/claude-plan-usage.ts",
-    "dev:headed": "tsx src/claude-plan-usage.ts --headed"
+    "daemon": "tsx src/claude-plan-usage.ts --daemon"
   },
   "keywords": [
     "claude",
     "anthropic",
     "usage",
-    "scraper",
-    "playwright"
+    "oauth",
+    "api"
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "playwright": "^1.40.0"
-  },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "tsx": "^4.6.0",
