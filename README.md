@@ -4,6 +4,10 @@ Fetches Claude plan usage percentages from the Anthropic OAuth API and serves th
 
 **Much simpler than web scraping!** No browser, no sessions, just a direct API call using your existing Claude Code credentials.
 
+> **📌 Ubuntu/Linux Users:** For systemd setup, use the [`ubuntu` branch](https://github.com/anthropics/claude-statusline/tree/ubuntu). See [README-UBUNTU.md](README-UBUNTU.md) for instructions.
+>
+> **🍎 macOS Users:** You're on the right branch (main) with LaunchAgent support.
+
 ## Prerequisites
 
 You must have Claude Code CLI authenticated:
