@@ -1,8 +1,17 @@
 # claude-statusline
 
-Custom Claude Code statusline, with ad/monetization tools (codebacks + AdSpin
-+ kickbacks webview) layered on top of it. This file documents how the pieces
-fit so the setup can be repaired fast after a tool update breaks it.
+Custom Claude Code statusline, with two ad/monetization tools (codebacks +
+kickbacks) layered on top of it. This file documents how the pieces fit so the
+setup can be repaired fast after a tool update breaks it.
+
+> **AdSpin / Claude Code Ads was tried and removed (2026-06).** It re-asserts
+> `settings.json` → its own path every few seconds while VS Code is open and has
+> NO chain-capture, so it constantly stomped the HUD. The only way to hold the
+> slot was `chflags uchg` on `settings.json`, which then blocks `/model` and
+> `/effort` from writing. Not worth it — uninstalled. If you ever reinstall it,
+> the lock-the-file approach is the only thing that works, and you do an
+> unlock/relock dance to change model/effort. Current setup is kickbacks-only on
+> the CLI surface (it chain-captures cleanly and needs no lock).
 
 No secrets in this file (repo is public). Tokens/keys live in the keychain and
 in the config files noted below, never here.
@@ -11,18 +20,19 @@ in the config files noted below, never here.
 
 - `statusline-with-usage.sh` — the HUD. Two boxes. Top box is 2 lines:
   `MODEL (+effort) | CONTEXT`, then `PATH (+git branch/status) | VERSION`. The
-  MODEL field appends the reasoning effort from `settings.json` `effortLevel`,
-  color-ramped per tier: none=dim, low=white, medium=green, high=yellow,
-  xhigh=orange, max=red. (`ultrathink` is a per-prompt thinking keyword, NOT an
-  effortLevel value, so it never appears here.) The VERSION
+  MODEL field appends the reasoning effort, read from the live session payload
+  (`.effort.level`, reflects `/effort` immediately) with a fallback to
+  `settings.json` `effortLevel`. Color-ramped per tier: none=dim, low=white,
+  medium=green, high=yellow, xhigh=orange, max=red. (`ultrathink` is a per-prompt
+  thinking keyword, NOT an effortLevel value, so it never appears here.) The VERSION
   field shows a yellow `↑<latest>` when a newer Claude Code release exists
   (latest pulled from `https://downloads.claude.ai/claude-code-releases/latest`,
   cached 1h in `/tmp/claude-statusline-ccver-cache`, fetched in the background so
   it never blocks render; compared with `sort -V`). Bottom box: 5HOUR/WEEK usage
   + codebacks EARNED/TOTAL. This is the thing we actively maintain.
-- `statusline-wrapped.sh` — fallback pass-through that `exec`s the HUD. Not
-  currently in the active chain (AdSpin owns the slot and chains via its own
-  script — see render chain below). Kept for recovery.
+- `statusline-wrapped.sh` — thin pass-through that `exec`s the HUD. This is the
+  stable chain target kickbacks captures in its PREV file (see render chain
+  below). Must keep existing at its path. Renders nothing itself.
 - `statusline.sh` — older single-line version (MODEL · CONTEXT · effort). Kept
   as a fallback for the v2.1.112+ cli-truncate regression (issue #37522). Swap
   the HUD for this if the multi-line boxes truncate/jitter.
@@ -31,41 +41,39 @@ in the config files noted below, never here.
 ## The render chain (important)
 
 Claude Code allows exactly ONE `statusLine.command` in `~/.claude/settings.json`.
-The working layout lets AdSpin own the slot while our HUD runs inside it:
+Kickbacks owns that slot via chain-capture and stacks our HUD below its ad:
 
 ```
 ~/.claude/settings.json  statusLine.command
-  -> node ~/.adspin/statusline.mjs    (our chain wrapper — AdSpin ad on top)
-       -> prints ad from ~/.adspin/ad.json
-            -> statusline-with-usage.sh   (our HUD)
-                 -> reads ~/.codebacks/state/claude-<session_id>.json  (codebacks earnings)
+  -> node ~/.vibe-ads/vibe-ads-statusline.mjs        (kickbacks adapter; prints ad on top)
+       -> reads ~/.vibe-ads/cli-prev-statusline.json (kickbacks "PREV" chain-capture)
+            -> /Users/Jason/Development/claude-statusline/statusline-wrapped.sh
+                 -> exec statusline-with-usage.sh     (our HUD)
+                      -> reads ~/.codebacks/state/claude-<session_id>.json  (codebacks earnings)
 ```
 
-On screen: AdSpin ad line, then our HUD boxes.
+On screen: kickbacks ad line, then our HUD boxes. Kickbacks owns the slot and
+"chains" our wrapper below its ad. The wrapper path is what kickbacks captured in
+its PREV file, which is why the wrapper must keep existing at that path.
 
-**Why AdSpin owns the slot:** AdSpin re-asserts `settings.json` → its own path
-every few seconds while VS Code is open. Letting it win and injecting our chain
-inside `~/.adspin/statusline.mjs` is the only stable approach.
+**⚠️ Adapter path trap (cost an hour 2026-06).** settings.json must point at the
+**substituted** adapter `~/.vibe-ads/vibe-ads-statusline.mjs` — NOT the raw
+template inside the extension dir
+(`.../kickbacksai.kickbacks-ai-*/dist/adapters/claude-cli/statusline.asset.mjs`).
+The `.asset.mjs` template still has literal `__VIBE_ADS_*__` placeholders; running
+it throws on the undefined constants and renders NOTHING (silent blank
+statusline). Always wire the `~/.vibe-ads/` copy.
 
-**Kickbacks CLI is off** (`~/.vibe-ads/cli.off` exists). Kickbacks earns only
-via the VS Code webview surface. `~/.vibe-ads/webview.off` must NOT exist.
-`spinnerVerbs` is owned by AdSpin (its spinner ad).
+**PREV self-reference trap.** PREV (`cli-prev-statusline.json`) must point at the
+**wrapper**, never at the kickbacks adapter itself. The adapter has a self-spawn
+guard (`!cmd.includes("vibe-ads-statusline.mjs")`); if PREV points back at the
+adapter, the guard refuses to chain and the HUD vanishes (only the ad shows).
+Kickbacks re-captures PREV from settings.json on activation, so as long as
+settings.json points at the adapter (not the wrapper), PREV stays correct.
 
-**AdSpin chain quirk** — AdSpin actively watches and restores both
-`settings.json` AND `~/.adspin/statusline.mjs`. The chain wrapper is locked
-immutable with `chflags uchg ~/.adspin/statusline.mjs` so it can't be stomped.
-`~/.adspin/statusline.real.mjs` is a backup of the original bare ad script.
-
-After an AdSpin extension update, it may fail to overwrite due to `uchg` and
-fall back to showing nothing. If the statusLine goes blank: unlock, let AdSpin
-re-apply its update, re-inject the chain, re-lock:
-```sh
-chflags nouchg ~/.adspin/statusline.mjs   # unlock so AdSpin can update
-# wait ~5s for AdSpin to write its new version, then:
-cp ~/.adspin/statusline.mjs ~/.adspin/statusline.real.mjs   # backup new version
-# Re-inject chain (see TROUBLESHOOTING below), then:
-chflags uchg ~/.adspin/statusline.mjs   # re-lock
-```
+**Surfaces:** kickbacks CLI surface is ON (no `~/.vibe-ads/cli.off`), webview
+surface is ON (no `~/.vibe-ads/webview.off`). No `spinnerVerbs` in settings.json
+(that was AdSpin's; cleared on removal).
 
 ## The two tools (different architectures)
 
@@ -82,23 +90,24 @@ chflags uchg ~/.adspin/statusline.mjs   # re-lock
 - You do NOT need to display the codebacks ad to earn (hook-based, timestamp
   impression). Safe to hide.
 
-**AdSpin / Claude Code Ads** (VS Code extension `claudecodeads.claude-code-ads`,
-config in `~/.adspin/`)
-- 75% dev share, PayPal weekly with $10 minimum.
-- Earns via spinner (`spinnerVerbs`) and statusLine impressions (10s per
-  impression). Both surfaces must be active. Requires VS Code extension running.
-- Owns `settings.json` statusLine slot — re-asserts its path aggressively while
-  VS Code is open. Solution: inject our HUD chain inside its own script
-  (`~/.adspin/statusline.mjs`) rather than fighting for the slot.
-- Ad cache: `~/.adspin/ad.json` (10 min TTL). Goes stale if VS Code is closed.
-- Check earnings at claudecodeads.com or the VS Code status bar.
-
 **kickbacks** (kickbacks.ai, VS Code extension `kickbacksai.kickbacks-ai`,
 config in `~/.vibe-ads/` and `~/.kickbacks/auth.json`)
-- CLI surface is OFF (`~/.vibe-ads/cli.off`). AdSpin handles CLI slots.
-- Webview surface is ON (no `~/.vibe-ads/webview.off`). Earns via VS Code
-  webview `view_tick` events while extension runs. 50% dev share.
-- Earnings not in a local file. Check at kickbacks.ai/me or VS Code status bar.
+- 50% dev share. Earns through the VS Code extension running in the background.
+  It (a) installs the statusLine adapter above, (b) refreshes a cached ad
+  (`~/.vibe-ads/cli-ad.json`, 10 min TTL), and (c) fires `view_tick` earning
+  events while the CLI/webview surface is applied and active.
+- It also patches the `claude` binary to print an ad banner. Claude Code
+  auto-updates wipe that patch; the extension re-applies it within ~60s, but
+  ONLY while VS Code is open with the extension active.
+- CONSEQUENCE for CLI-only work: kickbacks only earns while VS Code is open in
+  the background, signed in. Close VS Code and the CLI ad cache goes stale within
+  ~minutes. Unlike codebacks you can't fully hide it and still earn — the
+  surface must stay applied and you must be actively running turns.
+- Earnings are NOT in a readable local file (only VS Code state / backend
+  `/v1/earnings`). We deliberately do NOT pull kickbacks earnings into the HUD:
+  it needs minting a token from a rotating refresh token, which races the
+  extension's own rotation and logs you out. Check earnings at kickbacks.ai/me or
+  the VS Code status bar.
 
 ## Usage API (5HOUR / WEEK / RESETS)
 
@@ -115,78 +124,46 @@ gauges. Token source matters:
 
 ## TROUBLESHOOTING / quick fixes
 
-**HUD disappeared after AdSpin extension update**
-AdSpin overwrites `~/.adspin/statusline.mjs` on every extension update, replacing
-our chain with the bare ad-only script. Re-apply the chain:
+**HUD disappeared / only the kickbacks ad shows, no HUD boxes**
+Almost always one of the two chain traps. Check in order:
 ```sh
-# 0. Unlock first if it's immutable:
-chflags nouchg ~/.adspin/statusline.mjs
-# 1. Overwrite with the chain wrapper (copies the ad logic + chains HUD):
-cat > ~/.adspin/statusline.mjs << 'JSEOF'
-#!/usr/bin/env node
-import { readFileSync, writeSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-import { spawn } from "node:child_process";
-const MAX_AGE_MS = 10 * 60 * 1000;
-let wrote = false;
-const put = (s) => { try { writeSync(1, s); wrote = true; } catch {} };
-try {
-  const ad = JSON.parse(readFileSync(join(homedir(), ".adspin", "ad.json"), "utf8"));
-  const fresh = typeof ad.ts === "number" && Date.now() - ad.ts < MAX_AGE_MS;
-  const text = typeof ad.text === "string" ? ad.text.replace(/[\x00-\x1f]/g, "") : "";
-  const url = typeof ad.url === "string" &&
-    /^(https|vscode|vscode-insiders|vscodium|cursor|windsurf|code-oss):\/\/|^http:\/\/(localhost|127\.0\.0\.1)([:\/]|$)/.test(ad.url)
-    ? ad.url : "";
-  if (fresh && text) {
-    const OSC = "]8;;"; const BEL = "";
-    put(url ? OSC + url + BEL + "ad · " + text + OSC + BEL : "ad · " + text);
-  }
-} catch {}
-const HUD = "/Users/Jason/Development/claude-statusline/statusline-with-usage.sh";
-const stdinMode = process.stdin.isTTY ? "ignore" : "inherit";
-const child = spawn(HUD, { shell: false, stdio: [stdinMode, "pipe", "ignore"] });
-let out = ""; let done = false;
-const finish = () => {
-  if (done) return; done = true;
-  const text = out.replace(/[\r\n]+$/, "");
-  if (text) put((wrote ? "\n" : "") + text);
-  process.exit(0);
-};
-child.stdout.on("data", (d) => { out += d; });
-child.stdout.on("error", () => {});
-child.on("error", finish);
-child.on("close", finish);
-child.on("exit", () => { setTimeout(finish, 150); });
-setTimeout(() => { try { child.kill(); } catch {} finish(); }, 5000);
-JSEOF
-# 2. Re-lock:
-chflags uchg ~/.adspin/statusline.mjs
-# 3. Verify:
-echo '{"session_id":"x","model":{"display_name":"Sonnet 4.6"},"version":"2.1.183","workspace":{"current_dir":"'$PWD'"},"context_window":{"context_window_size":200000,"current_usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":100}}}' \
-  | node ~/.adspin/statusline.mjs
+# 1. settings.json points at the SUBSTITUTED adapter, not the .asset.mjs template:
+python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/settings.json')))['statusLine']['command'])"
+#   WANT:  node "/Users/Jason/.vibe-ads/vibe-ads-statusline.mjs"
+#   BAD:   anything ending in statusline.asset.mjs  (raw template → renders nothing)
+
+# 2. PREV points at the WRAPPER, not back at the adapter:
+python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.vibe-ads/cli-prev-statusline.json')))['statusLine']['command'])"
+#   WANT:  /Users/Jason/Development/claude-statusline/statusline-wrapped.sh
+#   BAD:   anything with vibe-ads-statusline.mjs  (self-spawn guard kills the chain)
+```
+Fix either:
+```sh
+python3 -c "import json,os;p=os.path.expanduser('~/.claude/settings.json');d=json.load(open(p));d['statusLine']={'type':'command','command':'node \"/Users/Jason/.vibe-ads/vibe-ads-statusline.mjs\"','refreshInterval':1};json.dump(d,open(p,'w'),indent=2)"
+echo '{"statusLine":{"type":"command","command":"/Users/Jason/Development/claude-statusline/statusline-wrapped.sh","refreshInterval":1}}' > ~/.vibe-ads/cli-prev-statusline.json
 ```
 
 **HUD disappeared after `codebacks update` / `codebacks init`**
-codebacks hard-overwrites `settings.statusLine`. AdSpin then reasserts its own
-path within seconds. No manual fix needed — just wait ~5s for AdSpin to win back
-the slot (which now chains the HUD). If it doesn't recover, check that
-`~/.adspin/statusline.mjs` is still our chain wrapper (not the bare original).
+codebacks hard-overwrites `settings.statusLine` to its own bare command. Re-point
+it at the kickbacks adapter (kickbacks will also re-capture within ~60s, but do it
+now so PREV doesn't capture codebacks' line):
+```sh
+python3 -c "import json,os;p=os.path.expanduser('~/.claude/settings.json');d=json.load(open(p));d['statusLine']={'type':'command','command':'node \"/Users/Jason/.vibe-ads/vibe-ads-statusline.mjs\"','refreshInterval':1};json.dump(d,open(p,'w'),indent=2)"
+echo '{"statusLine":{"type":"command","command":"/Users/Jason/Development/claude-statusline/statusline-wrapped.sh","refreshInterval":1}}' > ~/.vibe-ads/cli-prev-statusline.json
+```
 
 **Check who owns the statusLine right now**
 ```sh
-python3 -c "import json;print(json.load(open('$HOME/.claude/settings.json'))['statusLine'])"
-# Should show: node "/Users/Jason/.adspin/statusline.mjs"
-# Check that file is our chain wrapper (should import spawn and reference statusline-with-usage.sh):
-grep -c "statusline-with-usage" ~/.adspin/statusline.mjs   # want 1
+python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/settings.json')))['statusLine'])"
+cat ~/.vibe-ads/cli-prev-statusline.json   # what kickbacks chains below its ad
 ```
 
 **Test the full chain render (no live session needed)**
 ```sh
 rm -f /tmp/claude-statusline-usage-cache.json /tmp/claude-statusline-git-*.cache
 P='{"session_id":"<a real session id from ~/.codebacks/state>","model":{"display_name":"Opus 4.8"},"version":"2.1.183","workspace":{"current_dir":"'$PWD'","project_dir":"'$PWD'"},"context_window":{"context_window_size":1000000,"current_usage":{"input_tokens":1200,"cache_creation_input_tokens":3000,"cache_read_input_tokens":45000,"output_tokens":800}},"cost":{"total_cost_usd":0.42}}'
-echo "$P" | node ~/.adspin/statusline.mjs   # full chain (ad + HUD)
-echo "$P" | ./statusline-with-usage.sh      # HUD only
+echo "$P" | node ~/.vibe-ads/vibe-ads-statusline.mjs   # full chain (ad + HUD)
+echo "$P" | ./statusline-with-usage.sh                 # HUD only
 ```
 
 **EARNED / TOTAL stuck at $0.00**
@@ -212,10 +189,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $tok" \
   cli/extension that is not on npm yet, so `npx codebacks@latest update` can be a
   no-op even when it claims a newer version "exists." That is expected.
 - `npx codebacks@latest update` re-wires hooks and OVERWRITES settings.statusLine
-  to codebacks' bare command. After running it: redo the PREV fix above, then
-  test the chain. codebacks hooks should still be 1 each (no dupes).
+  to codebacks' bare command. After running it: re-point settings.json at the
+  kickbacks adapter + reset PREV (see the codebacks-update fix above), then test
+  the chain. codebacks hooks should still be 1 each (no dupes).
 - kickbacks updates via the VS Code extension. After an update it says to FULLY
-  quit and reopen VS Code (not just reload) to load the new build.
+  quit and reopen VS Code (not just reload) to load the new build. The extension
+  dir version bumps (`kickbacksai.kickbacks-ai-X.Y.Z`), but settings.json points
+  at the version-agnostic `~/.vibe-ads/vibe-ads-statusline.mjs`, so the chain
+  survives — the extension just refreshes that file's substituted contents.
 - Backups of settings.json are written as `~/.claude/settings.json.*backup*` /
   `.pre-codebacks-update` when we touch it. Diff against those if wiring looks off.
 
