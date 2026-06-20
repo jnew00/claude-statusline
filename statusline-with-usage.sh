@@ -174,8 +174,10 @@ ctx_used_f=$(fmt "$total_in"); ctx_total_f=$(fmt "$ctx_size")
 in_f=$(fmt "$total_in"); out_f=$(fmt "$out_tok"); cache_f=$(fmt "$total_cache")
 cost_f=$(printf '$%.2f' "$sess_cost")
 
-# Reasoning effort (from settings)
-effort=$(jq -r '.effortLevel // "off"' "$HOME/.claude/settings.json" 2>/dev/null)
+# Reasoning effort: prefer the live session value from the payload (reflects
+# /effort changes immediately); fall back to the persisted settings default.
+effort=$(echo "$input" | jq -r '.effort.level // empty' 2>/dev/null)
+[ -z "$effort" ] && effort=$(jq -r '.effortLevel // empty' "$HOME/.claude/settings.json" 2>/dev/null)
 [ -z "$effort" ] || [ "$effort" = "null" ] && effort="off"
 case "$effort" in
     max)     effort_color="$red" ;;
