@@ -121,19 +121,24 @@ proj_name=$(basename "$proj_dir" 2>/dev/null)
 [ -z "$proj_name" ] || [ "$proj_name" = "." ] && proj_name="~"
 [ ${#proj_name} -gt 30 ] && proj_name="${proj_name:0:27}..."
 
-# ── Git (cached) ────────────────────────────────────────────
-git_cache="/tmp/claude-statusline-git-cache"
+# ── Git (cached per-directory) ──────────────────────────────
+# Query the session's actual dir (git -C), and key the cache by that dir so
+# concurrent sessions in other repos can't leak their branch into this one.
+gitdir=$(echo "$input" | jq -r '.workspace.current_dir // empty')
+[ -z "$gitdir" ] && gitdir="$PWD"
+dirkey=$(printf '%s' "$gitdir" | cksum | cut -d' ' -f1)
+git_cache="/tmp/claude-statusline-git-${dirkey}.cache"
 git_stale=true
 if [ -f "$git_cache" ]; then
     gm=$(stat -f %m "$git_cache" 2>/dev/null || echo 0)
     [ $(($(date +%s) - gm)) -lt 5 ] && git_stale=false
 fi
 if $git_stale; then
-    if git rev-parse --git-dir > /dev/null 2>&1; then
-        gb=$(git branch --show-current 2>/dev/null)
-        ut=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
-        st=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
-        md=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
+    if git -C "$gitdir" rev-parse --git-dir > /dev/null 2>&1; then
+        gb=$(git -C "$gitdir" branch --show-current 2>/dev/null)
+        ut=$(git -C "$gitdir" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+        st=$(git -C "$gitdir" diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
+        md=$(git -C "$gitdir" diff --numstat 2>/dev/null | wc -l | tr -d ' ')
         gs=""
         [ "$ut" -gt 0 ] && gs+="?${ut}"
         [ "$st" -gt 0 ] && gs+="+${st}"

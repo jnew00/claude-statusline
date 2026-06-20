@@ -118,7 +118,7 @@ cat ~/.vibe-ads/cli-prev-statusline.json   # what kickbacks chains below its ad
 
 **Test the full chain render (no live session needed)**
 ```sh
-rm -f /tmp/claude-statusline-usage-cache.json /tmp/claude-statusline-git-cache
+rm -f /tmp/claude-statusline-usage-cache.json /tmp/claude-statusline-git-*.cache
 P='{"session_id":"<a real session id from ~/.codebacks/state>","model":{"display_name":"Opus 4.8"},"version":"2.1.183","workspace":{"current_dir":"'$PWD'","project_dir":"'$PWD'"},"context_window":{"context_window_size":1000000,"current_usage":{"input_tokens":1200,"cache_creation_input_tokens":3000,"cache_read_input_tokens":45000,"output_tokens":800}},"cost":{"total_cost_usd":0.42}}'
 echo "$P" | node ~/.vibe-ads/vibe-ads-statusline.mjs   # full chain (ad + HUD)
 echo "$P" | ./statusline-with-usage.sh                 # HUD only
