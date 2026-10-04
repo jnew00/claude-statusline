@@ -3,3 +3,6 @@ dist/
 *.log
 .DS_Store
 NOTES.md
+
+# Archify diagram output (local, regenerated on demand)
+.archify/

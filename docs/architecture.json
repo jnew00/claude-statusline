@@ -1,0 +1,420 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "claude-statusline HUD render chain",
+    "output": ".archify/architecture-claude-statusline-overview-20261003-200616/claude-statusline-overview.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:jnew00/claude-statusline.git",
+      "revision": "bfad2e673995cb717c04b701e593bc3a087735b3",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    {
+      "id": "cc",
+      "type": "external",
+      "label": "Claude Code",
+      "sublabel": "one statusLine.command",
+      "pos": [
+        40,
+        200
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "CLAUDE.md",
+          "line": 43,
+          "end_line": 44,
+          "label": "single statusLine slot"
+        },
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 6,
+          "end_line": 7,
+          "label": "session JSON on stdin"
+        }
+      ]
+    },
+    {
+      "id": "adapter",
+      "type": "external",
+      "label": "Kickbacks adapter",
+      "sublabel": "node, prints ad on top",
+      "pos": [
+        260,
+        200
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "CLAUDE.md",
+          "line": 43,
+          "end_line": 50,
+          "label": "adapter owns the slot"
+        }
+      ]
+    },
+    {
+      "id": "prev",
+      "type": "database",
+      "label": "PREV chain file",
+      "sublabel": "cli-prev-statusline.json",
+      "pos": [
+        260,
+        340
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "CLAUDE.md",
+          "line": 49,
+          "end_line": 50,
+          "label": "PREV capture"
+        },
+        {
+          "path": "CLAUDE.md",
+          "line": 67,
+          "end_line": 71,
+          "label": "must name the wrapper"
+        }
+      ]
+    },
+    {
+      "id": "wrapper",
+      "type": "backend",
+      "label": "statusline-wrapped.sh",
+      "sublabel": "stable chain target",
+      "pos": [
+        490,
+        200
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "statusline-wrapped.sh",
+          "line": 1,
+          "end_line": 4,
+          "label": "exec to HUD"
+        }
+      ]
+    },
+    {
+      "id": "hud",
+      "type": "backend",
+      "label": "HUD script",
+      "sublabel": "statusline-with-usage.sh",
+      "pos": [
+        730,
+        200
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "bash + jq",
+      "sources": [
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 78,
+          "end_line": 104,
+          "label": "parse payload"
+        },
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 251,
+          "end_line": 304,
+          "label": "draw boxes"
+        }
+      ]
+    },
+    {
+      "id": "codebacks",
+      "type": "database",
+      "label": "Codebacks state",
+      "sublabel": "~/.codebacks/state",
+      "pos": [
+        730,
+        60
+      ],
+      "size": [
+        170,
+        60
+      ],
+      "sources": [
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 106,
+          "end_line": 113,
+          "label": "earnedCents / totalCents"
+        }
+      ]
+    },
+    {
+      "id": "keychain",
+      "type": "security",
+      "label": "macOS keychain",
+      "sublabel": "OAuth access token",
+      "pos": [
+        490,
+        60
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 199,
+          "end_line": 204,
+          "label": "get_token"
+        }
+      ]
+    },
+    {
+      "id": "cache",
+      "type": "database",
+      "label": "Usage cache",
+      "sublabel": "/tmp, 60s TTL",
+      "pos": [
+        730,
+        340
+      ],
+      "size": [
+        170,
+        60
+      ],
+      "sources": [
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 192,
+          "end_line": 197,
+          "label": "cache read"
+        },
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 226,
+          "label": "cache write"
+        }
+      ]
+    },
+    {
+      "id": "git",
+      "type": "external",
+      "label": "git CLI",
+      "sublabel": "branch and status",
+      "pos": [
+        490,
+        340
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 136,
+          "end_line": 149,
+          "label": "git -C, 5s cache"
+        }
+      ]
+    },
+    {
+      "id": "usage",
+      "type": "cloud",
+      "label": "Anthropic usage API",
+      "sublabel": "/api/oauth/usage",
+      "pos": [
+        1010,
+        200
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 221,
+          "end_line": 225,
+          "label": "Bearer GET"
+        }
+      ]
+    },
+    {
+      "id": "releases",
+      "type": "cloud",
+      "label": "Release feed",
+      "sublabel": "downloads.claude.ai",
+      "pos": [
+        1010,
+        340
+      ],
+      "size": [
+        170,
+        60
+      ],
+      "sources": [
+        {
+          "path": "statusline-with-usage.sh",
+          "line": 159,
+          "end_line": 164,
+          "label": "background curl, 1h cache"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Local machine (Jason's Mac)",
+      "wraps": [
+        "cc",
+        "adapter",
+        "prev",
+        "wrapper",
+        "hud",
+        "codebacks",
+        "keychain",
+        "cache",
+        "git"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Kickbacks-owned (~/.vibe-ads)",
+      "wraps": [
+        "adapter",
+        "prev"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "cc-to-adapter",
+      "from": "cc",
+      "to": "adapter",
+      "label": "session JSON",
+      "variant": "emphasis"
+    },
+    {
+      "id": "adapter-to-prev",
+      "from": "adapter",
+      "to": "prev",
+      "label": "reads PREV",
+      "variant": "dashed"
+    },
+    {
+      "id": "adapter-to-wrapper",
+      "from": "adapter",
+      "to": "wrapper",
+      "label": "chains",
+      "variant": "emphasis"
+    },
+    {
+      "id": "wrapper-to-hud",
+      "from": "wrapper",
+      "to": "hud",
+      "label": "exec",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "hud-to-codebacks",
+      "from": "hud",
+      "to": "codebacks",
+      "label": "reads earnings",
+      "variant": "dashed"
+    },
+    {
+      "id": "hud-to-keychain",
+      "from": "hud",
+      "to": "keychain",
+      "label": "token",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "right"
+    },
+    {
+      "id": "hud-to-cache",
+      "from": "hud",
+      "to": "cache",
+      "label": "read/write",
+      "variant": "dashed"
+    },
+    {
+      "id": "hud-to-git",
+      "from": "hud",
+      "to": "git",
+      "label": "status",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "hud-to-usage",
+      "from": "hud",
+      "to": "usage",
+      "label": "HTTPS GET",
+      "variant": "security"
+    },
+    {
+      "id": "hud-to-releases",
+      "from": "hud",
+      "to": "releases",
+      "label": "bg curl",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Primary path",
+      "items": [
+        "Claude Code runs the one statusLine.command with session JSON",
+        "Kickbacks adapter prints its ad, then runs the PREV target",
+        "Wrapper execs the HUD, which draws the two boxes to stdout"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Chain traps",
+      "items": [
+        "settings.json must point at the substituted ~/.vibe-ads adapter, not the .asset.mjs template",
+        "PREV must name the wrapper, never the adapter (self-spawn guard)"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust",
+      "items": [
+        "OAuth token comes from the keychain, falls back to ~/.claude/.credentials.json, then cli-proxy files",
+        "Third-party tools (Kickbacks, Codebacks) own their files; the HUD only reads"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not in this path",
+      "items": [
+        "src/claude-plan-usage.ts is a separate daemon writing ~/.claude/plan-usage.json",
+        "docker/ holds a legacy Playwright scraper setup"
+      ]
+    }
+  ]
+}

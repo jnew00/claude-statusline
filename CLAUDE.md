@@ -206,3 +206,16 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $tok" \
 indicator (shown because the `claude` alias uses `--dangerously-skip-permissions`).
 It is NOT part of the statusline and there is no supported setting to hide it.
 Only removable by patching the binary, which updates wipe. Leave it.
+
+## Architecture diagram
+
+`docs/architecture.json` is the Archify spec for the system overview
+(the Claude Code to Kickbacks adapter to wrapper to HUD render chain, the local
+machine and Kickbacks-owned boundaries, the Anthropic usage API and release
+feed), with file:line sources pinned to a commit. If a change adds, removes, or
+rewires a top-level component, external service, or trust boundary, update the
+spec after committing it: re-pin `meta.repository.revision` to that commit, fix
+the affected nodes, edges, and sources, re-render with the `archify` skill
+(`finalize ... --repo-root .`), and commit the spec. Internal refactors and
+shifted line numbers don't need it. Rendered HTML goes in `.archify/`
+(gitignored).
