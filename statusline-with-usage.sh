@@ -1,7 +1,6 @@
 #!/bin/bash
-# Claude Code StatusLine - Box Layout with Git, Path & Usage
-# Top box: MODEL, VERSION, CONTEXT, PROJECT, ELAPSED, BRANCH, THINKING, PATH bar
-# Bottom box: IN, OUT, CACHE, SESSION cost, BLOCK/WEEK bars, RESETS, EXTRA
+# Claude Code StatusLine - Box Layout with Git & Path
+# MODEL (+effort) | CONTEXT, then PATH (+git) | VERSION (+update)
 
 input=$(cat)
 if [ -z "$input" ]; then printf "Claude"; exit 0; fi
@@ -11,7 +10,6 @@ e=$'\033'
 blue="${e}[38;2;80;180;255m"
 orange="${e}[38;2;255;200;100m"
 green="${e}[38;2;50;230;50m"
-cyan="${e}[38;2;80;230;230m"
 red="${e}[38;2;255;100;100m"
 yellow="${e}[38;2;240;220;50m"
 white="${e}[38;2;240;240;240m"
@@ -43,38 +41,6 @@ fmt() {
     else printf "%d" "$n"; fi
 }
 
-build_bar() {
-    local pct=$1 width=${2:-10}
-    [ "$pct" -lt 0 ] 2>/dev/null && pct=0
-    [ "$pct" -gt 100 ] 2>/dev/null && pct=100
-    local filled=$(( (pct * width + 50) / 100 ))
-    [ "$filled" -gt "$width" ] && filled=$width
-    local empty=$(( width - filled )) bc
-    if [ "$pct" -ge 90 ]; then bc="$red"
-    elif [ "$pct" -ge 70 ]; then bc="$yellow"
-    elif [ "$pct" -ge 50 ]; then bc="$orange"
-    else bc="$green"; fi
-    local f="" emp=""
-    for ((i=0;i<filled;i++)); do f+="●"; done
-    for ((i=0;i<empty;i++)); do emp+="○"; done
-    printf "%s%s%s%s%s" "$bc" "$f" "$dm" "$emp" "$rs"
-}
-
-time_remaining() {
-    local iso="$1"
-    [ -z "$iso" ] || [ "$iso" = "null" ] && return
-    local ep
-    ep=$(python3 -c "from datetime import datetime
-s='$iso'.replace('Z','+00:00')
-print(int(datetime.fromisoformat(s).timestamp()))" 2>/dev/null) || return
-    [ -z "$ep" ] && return
-    local d=$(( ep - $(date +%s) )); [ "$d" -lt 0 ] && d=0
-    local h=$((d/3600)) m=$(((d%3600)/60))
-    if [ "$h" -gt 24 ]; then printf "%dd %dh" $((h/24)) $((h%24))
-    elif [ "$h" -gt 0 ]; then printf "%dh %dm" "$h" "$m"
-    else printf "%dm" "$m"; fi
-}
-
 # ── Parse JSON ──────────────────────────────────────────────
 model=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 version=$(echo "$input" | jq -r '.version // "?"')
@@ -102,19 +68,6 @@ lines_rm=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 
 dur_s=$((dur_ms / 1000))
 elapsed=$(printf "%d:%02d:%02d" $((dur_s/3600)) $(((dur_s%3600)/60)) $((dur_s%60)))
-
-# ── Codebacks earnings (read from its state file for this session) ──
-session_id=$(echo "$input" | jq -r '.session_id // empty')
-cb_earned=0; cb_total=0
-cb_state="$HOME/.codebacks/state/claude-${session_id}.json"
-if [ -n "$session_id" ] && [ -f "$cb_state" ]; then
-    cb_earned=$(jq -r '.earnedCents // 0' "$cb_state" 2>/dev/null)
-    cb_total=$(jq -r '.totalCents // 0' "$cb_state" 2>/dev/null)
-fi
-[ "$cb_earned" = "null" ] || [ -z "$cb_earned" ] && cb_earned=0
-[ "$cb_total" = "null" ] || [ -z "$cb_total" ] && cb_total=0
-cb_earned_f=$(printf '+$%.2f' "$(echo "scale=2; $cb_earned/100" | bc 2>/dev/null)" 2>/dev/null || echo '+$0.00')
-cb_total_f=$(printf '$%.2f' "$(echo "scale=2; $cb_total/100" | bc 2>/dev/null)" 2>/dev/null || echo '$0.00')
 
 proj_dir=$(echo "$input" | jq -r '.workspace.project_dir // ""')
 proj_name=$(basename "$proj_dir" 2>/dev/null)
@@ -188,62 +141,6 @@ case "$effort" in
     *)       effort_color="$dm" ;;   # none / off / unset
 esac
 
-# ── Usage API (cached) ─────────────────────────────────────
-ucache="/tmp/claude-statusline-usage-cache.json"
-needs_refresh=true; udata=""
-if [ -f "$ucache" ]; then
-    um=$(stat -f %m "$ucache" 2>/dev/null || echo 0)
-    [ $(($(date +%s) - um)) -lt 60 ] && { needs_refresh=false; udata=$(cat "$ucache" 2>/dev/null); }
-fi
-
-get_token() {
-    local t
-    # macOS Claude Code stores OAuth creds in the login keychain, not a file.
-    t=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
-        | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)
-    [ -n "$t" ] && { echo "$t"; return; }
-    # Linux / older installs keep them in a file.
-    if [ -f "$HOME/.claude/.credentials.json" ]; then
-        t=$(jq -r '.claudeAiOauth.accessToken // empty' "$HOME/.claude/.credentials.json" 2>/dev/null)
-        [ -n "$t" ] && { echo "$t"; return; }
-    fi
-    # Last resort: cli-proxy token (often rate-limited).
-    for f in "$HOME"/.cli-proxy-api/claude-*.json; do
-        [ -f "$f" ] || continue
-        t=$(jq -r '.access_token // empty' "$f" 2>/dev/null)
-        [ -n "$t" ] && { echo "$t"; return; }
-    done
-}
-
-if $needs_refresh; then
-    tok=$(get_token)
-    if [ -n "$tok" ]; then
-        resp=$(curl -sf --max-time 5 \
-            -H "Accept: application/json" -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $tok" -H "anthropic-beta: oauth-2025-04-20" \
-            -H "User-Agent: claude-code/${version}" \
-            "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-        [ -n "$resp" ] && { udata="$resp"; echo "$resp" > "$ucache"; }
-    fi
-    [ -z "$udata" ] && [ -f "$ucache" ] && udata=$(cat "$ucache" 2>/dev/null)
-fi
-
-block_pct=0; block_resets=""; week_pct=0; week_resets=""; extra_str=""
-if [ -n "$udata" ]; then
-    block_pct=$(printf "%.0f" "$(echo "$udata" | jq -r '.five_hour.utilization // 0')" 2>/dev/null || echo 0)
-    block_resets=$(time_remaining "$(echo "$udata" | jq -r '.five_hour.resets_at // empty')")
-    week_pct=$(printf "%.0f" "$(echo "$udata" | jq -r '.seven_day.utilization // 0')" 2>/dev/null || echo 0)
-    week_resets=$(time_remaining "$(echo "$udata" | jq -r '.seven_day.resets_at // empty')")
-    xen=$(echo "$udata" | jq -r '.extra_usage.is_enabled // false' 2>/dev/null)
-    if [ "$xen" = "true" ]; then
-        xu=$(echo "$udata" | jq -r '.extra_usage.used_credits // 0' 2>/dev/null)
-        xl=$(echo "$udata" | jq -r '.extra_usage.monthly_limit // 0' 2>/dev/null)
-        xud=$(printf "%.2f" "$(echo "scale=2; $xu/100" | bc 2>/dev/null)")
-        xld=$(printf "%.2f" "$(echo "scale=2; $xl/100" | bc 2>/dev/null)")
-        extra_str="\$${xud}/\$${xld}"
-    fi
-fi
-
 # ═══════════════════════════════════════════════════════════
 # OUTPUT
 # ═══════════════════════════════════════════════════════════
@@ -273,31 +170,6 @@ _label "PATH";    _pad_to 9; _val "$cur_dir"
 _pad_to 56
 _label "VERSION"; _gap 2; _val "$version" "$blue"
 [ -n "$cc_update" ] && _val " ↑${cc_latest}" "$yellow"
-_emit; printf "\n"
-
-box_line "└" "┘"
-printf "\n"
-
-# ── BOTTOM BOX ──
-box_line "┌" "┐"
-printf "\n"
-
-# Row 1: 5HOUR bar | RESETS | SESSION
-_begin
-_label "5HOUR";   _pad_to 9; _bar "$(build_bar $block_pct 10)" 10; _gap 1; _val "${block_pct}%" "$cyan"
-_pad_to 34
-_label "RESETS";  _gap 2; _val "${block_resets:-n/a}"
-_pad_to 56
-_label "EARNED";  _pad_to 64; _val "$cb_earned_f" "$green"
-_emit; printf "\n"
-
-# Row 2: WEEK bar | RESETS | EXTRA
-_begin
-_label "WEEK";    _pad_to 9; _bar "$(build_bar $week_pct 10)" 10; _gap 1; _val "${week_pct}%" "$cyan"
-_pad_to 34
-_label "RESETS";  _gap 2; _val "${week_resets:-n/a}"
-_pad_to 56
-_label "TOTAL";   _pad_to 64; _val "$cb_total_f" "$green"
 _emit; printf "\n"
 
 box_line "└" "┘"
